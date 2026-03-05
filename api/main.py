@@ -413,28 +413,54 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if not joined:
                 await send_force_join_msg(update, not_joined)
                 return
+        R = "\u200f"
         kb = ReplyKeyboardMarkup([
-            [KeyboardButton("🍓 بۆتی ڕیاکشن")],
+            [KeyboardButton("🍓 بۆتی ڕیاکشن"), KeyboardButton("🪪 بۆتی زانیاری")],
             [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
         ], resize_keyboard=True)
         await update.message.reply_text(
-            "🤖 <b>جۆری بۆت هەڵبژێرە:</b>\n\n"
-            "🍓 <b>بۆتی ڕیاکشن</b> — بۆ هەموو نامەیەک ئیموجی دەنێرێت ❤️",
+            f"{R}🤖 <b>جۆری بۆتەکەت هەڵبژێرە</b>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}🍓 <b>بۆتی ڕیاکشن</b>\n"
+            f"{R}   بۆ هەموو نامەیەک ئیموجی دەنێرێت\n\n"
+            f"{R}🪪 <b>بۆتی زانیاری</b>\n"
+            f"{R}   فەرمانی /id و /info پشتگیری دەکات\n"
+            f"{R}   زانیاری تەواوی بەکارهێنەر نیشان دەدات\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━",
             parse_mode="HTML", reply_markup=kb,
         )
         return
 
     if txt == "🍓 بۆتی ڕیاکشن":
         await db_put(f"users/{uid}/state", "await_token")
+        await db_put(f"users/{uid}/pending_bot_type", "reaction")
+        R = "\u200f"
         kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
         await update.message.reply_text(
-            "🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
-            "📋 <b>مامەڵەکە:</b>\n"
-            "١. بچۆ بۆ @BotFather لە تێلیگرام\n"
-            "٢. بنووسە /newbot\n"
-            "٣. ناوی بۆتەکەت دابنێ\n"
-            "٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
-            "⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
+            f"{R}🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
+            f"{R}📋 <b>مامەڵەکە:</b>\n"
+            f"{R}١. بچۆ بۆ @BotFather لە تێلیگرام\n"
+            f"{R}٢. بنووسە /newbot\n"
+            f"{R}٣. ناوی بۆتەکەت دابنێ\n"
+            f"{R}٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
+            f"{R}⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
+            parse_mode="HTML", reply_markup=kb,
+        )
+        return
+
+    if txt == "🪪 بۆتی زانیاری":
+        await db_put(f"users/{uid}/state", "await_token")
+        await db_put(f"users/{uid}/pending_bot_type", "info")
+        R = "\u200f"
+        kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
+        await update.message.reply_text(
+            f"{R}🪪 <b>دروستکردنی بۆتی زانیاری</b>\n\n"
+            f"{R}📋 <b>مامەڵەکە:</b>\n"
+            f"{R}١. بچۆ بۆ @BotFather لە تێلیگرام\n"
+            f"{R}٢. بنووسە /newbot\n"
+            f"{R}٣. ناوی بۆتەکەت دابنێ\n"
+            f"{R}٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
+            f"{R}⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -2080,37 +2106,51 @@ async def activate_token(update: Update, uid: int, token: str):
         if not wh.get("ok"):
             await sm.edit_text("❌ هەڵەیەک ڕوویدا لە بەستنەوەی وەبهووک.")
             return
+        # جۆری بۆت لە پێشتر هەڵبژێردرا
+        chosen_type = await db_get(f"users/{uid}/pending_bot_type") or "reaction"
+        await db_del(f"users/{uid}/pending_bot_type")
+
         await db_put(f"managed_bots/{bid}",{
             "token":token,"owner":uid,"bot_username":bun,
-            "bot_name":bnm,"status":"running","type":"reaction","welcome_msg":"",
+            "bot_name":bnm,"status":"running","type":chosen_type,"welcome_msg":"",
             "created": now_str(), "notif_enabled": True,
         })
         await db_del(f"users/{uid}/state")
-        # پاشەکەوتکردنی bid بۆ دۆخی هەڵبژاردنی جۆر
-        await db_put(f"users/{uid}/pending_bot_id", bid)
-        await db_put(f"users/{uid}/state", "choose_bot_type")
+        await db_put(f"users/{uid}/selected_bot", bid)
         R = "\u200f"
-        vip_stat = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
+        vip_stat  = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
+        type_lbl  = "🍓 بۆتی ڕیاکشن" if chosen_type == "reaction" else "🪪 بۆتی زانیاری"
+        type_hint = (
+            f"{R}٥. بۆ هەموو نامەیەک ئیموجی دەنێرێت 🍓"
+            if chosen_type == "reaction" else
+            f"{R}٥. /id یان /info بنووسە تا زانیاری بەکارهێنەر ببینیت 🪪"
+        )
         await sm.edit_text(
             f"{R}🎉 <b>پیرۆزە! بۆتەکەت سەرکەوتووانە دروست کرا</b>\n"
             f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{R}🤖 <b>ناوی بۆت:</b> {html.escape(bnm)}\n"
             f"{R}🔗 <b>یوزەرنەیم:</b> @{bun}\n"
             f"{R}🆔 <b>ID ی بۆت:</b> <code>{bid}</code>\n"
+            f"{R}🎯 <b>جۆر:</b> {type_lbl}\n"
             f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{R}👑 <b>خاوەن:</b> <a href='tg://user?id={uid}'>ئێتۆ</a>\n"
             f"{R}🎖 <b>دۆخی ئێتۆ:</b> {vip_stat}\n"
             f"{R}⏰ <b>کاتی دروستکردن:</b> {now_str()}\n"
             f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{R}🟢 <b>دۆخ:</b> چالاک و ئامادەیە\n"
-            f"{R}🔔 <b>ئاگادارکردنەوە:</b> ✅ چالاک",
+            f"{R}🔔 <b>ئاگادارکردنەوە:</b> ✅ چالاک\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}📌 <b>هەنگاوەکان:</b>\n"
+            f"{R}١. بۆتەکەت زیاد بکە بۆ گروپ/کانالەکەت\n"
+            f"{R}٢. ئادمینی تەواوی پێ بدە\n"
+            f"{R}٣. لە '📂 بۆتەکانم' کۆنترۆڵی بکە\n"
+            f"{R}٤. ئاگادارکردنەوە چالاکە 🔔\n"
+            f"{type_hint}",
             parse_mode="HTML",
         )
         await update.message.reply_text(
-            f"{R}👇 <b>جۆری بۆتەکەت هەڵبژێرە:</b>\n\n"
-            f"{R}🍓 <b>بۆتی ڕیاکشن</b> — بۆ هەموو نامەیەک ئیموجی دەنێرێت\n"
-            f"{R}🪪 <b>بۆتی زانیاری</b> — فەرمانی /id و /info پشتگیری دەکات",
-            parse_mode="HTML", reply_markup=KB_BOT_TYPE
+            f"{R}👇 بۆ کۆنترۆڵ:",
+            parse_mode="HTML", reply_markup=kb_control(uid)
         )
     except Exception as e:
         logger.error(f"activate: {e}")
