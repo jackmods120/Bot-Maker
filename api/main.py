@@ -444,6 +444,43 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await show_bot_control(update, uid, bid, all_b[bid])
         return
 
+    # ── کوژاندنی/چالاككردنی ئاگادارکردنەوەی بۆت ─────────────────────────
+    if txt == "🔕 کوژاندنی ئاگادارکردنەوەی بۆتم":
+        R = "\u200f"
+        all_b = await db_get("managed_bots") or {}
+        mine  = {k:v for k,v in all_b.items() if v.get("owner") == uid}
+        for bid_k, binfo in mine.items():
+            binfo["notif_enabled"] = False
+            await db_put(f"managed_bots/{bid_k}", binfo)
+        kb_on = ReplyKeyboardMarkup([
+            [KeyboardButton("📂 بۆتەکانم"), KeyboardButton("🔔 چالاككردنی ئاگادارکردنەوەی بۆتم")],
+            [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            f"{R}🔕 <b>ئاگادارکردنەوەی بۆتەکانت کوژێنرایەوە</b>\n\n"
+            f"{R}📌 ئێستا کاتێک بەکارهێنەرێک /start کرد ئاگادار ناکرێیتەوە",
+            parse_mode="HTML", reply_markup=kb_on
+        )
+        return
+
+    if txt == "🔔 چالاككردنی ئاگادارکردنەوەی بۆتم":
+        R = "\u200f"
+        all_b = await db_get("managed_bots") or {}
+        mine  = {k:v for k,v in all_b.items() if v.get("owner") == uid}
+        for bid_k, binfo in mine.items():
+            binfo["notif_enabled"] = True
+            await db_put(f"managed_bots/{bid_k}", binfo)
+        kb_off = ReplyKeyboardMarkup([
+            [KeyboardButton("📂 بۆتەکانم"), KeyboardButton("🔕 کوژاندنی ئاگادارکردنەوەی بۆتم")],
+            [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            f"{R}🔔 <b>ئاگادارکردنەوەی بۆتەکانت چالاک کرایەوە</b>\n\n"
+            f"{R}📌 ئێستا کاتێک بەکارهێنەرێک /start کرد ئاگادار دەکرێیتەوە 🔔",
+            parse_mode="HTML", reply_markup=kb_off
+        )
+        return
+
     # ── دوگمەکانی کۆنترۆڵ ────────────────────────────────────────────────
     CTRL = {
         "▶️ دەستپێکردن","⏸ وەستاندن","🔄 نوێکردنەوە","📋 زانیاری بۆت",
@@ -1919,15 +1956,45 @@ async def activate_token(update: Update, uid: int, token: str):
         await db_put(f"managed_bots/{bid}",{
             "token":token,"owner":uid,"bot_username":bun,
             "bot_name":bnm,"status":"running","type":"reaction","welcome_msg":"",
+            "created": now_str(), "notif_enabled": True,
         })
         await db_del(f"users/{uid}/state")
+        R = "\u200f"
+        # ئامارەکانی سیستەم
+        all_bots = await db_get("managed_bots") or {}
+        all_u    = await db_get("users") or {}
+        vip_stat = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
         await sm.edit_text(
-            f"‏✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
-            f"🤖 ناو: {html.escape(bnm)}\n🔗 یوزەر: @{bun}\n🆔 ID: <code>{bid}</code>\n\n"
-            "📌 زیادی بکە بۆ گروپ/کانالت و ئادمینی بکە ✅",
+            f"{R}🎉 <b>پیرۆزە! بۆتەکەت سەرکەوتووانە دروست کرا</b>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}🤖 <b>ناوی بۆت:</b> {html.escape(bnm)}\n"
+            f"{R}🔗 <b>یوزەرنەیم:</b> @{bun}\n"
+            f"{R}🆔 <b>ID ی بۆت:</b> <code>{bid}</code>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}👑 <b>خاوەن:</b> <a href='tg://user?id={uid}'>ئێتۆ</a>\n"
+            f"{R}🎖 <b>دۆخی ئێتۆ:</b> {vip_stat}\n"
+            f"{R}⏰ <b>کاتی دروستکردن:</b> {now_str()}\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}🟢 <b>دۆخ:</b> چالاک و ئامادەیە\n"
+            f"{R}🔔 <b>ئاگادارکردنەوە:</b> ✅ چالاک\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}📌 <b>پێنج هەنگاوی داهاتوو:</b>\n"
+            f"{R}١. بۆتەکەت زیاد بکە بۆ گروپ/کانالەکەت\n"
+            f"{R}٢. ئادمینی تەواوی پێ بدە\n"
+            f"{R}٣. لە '📂 بۆتەکانم' کۆنترۆڵی بکە\n"
+            f"{R}٤. نامەی بەخێرهاتن ئەگەر دەتەوێت گۆڕی\n"
+            f"{R}٥. ئاگادارکردنەوە چالاکە، هەربەکارهێنەرێک /start کرد ئاگادار دەبیت 🔔",
             parse_mode="HTML",
         )
-        await update.message.reply_text("📂 لە 'بۆتەکانم' کۆنترۆڵی بکە:", reply_markup=kb_main(uid))
+        # کیبۆردی کۆنترۆڵ بۆ ئاگادارکردنەوە
+        kb_notif = ReplyKeyboardMarkup([
+            [KeyboardButton("📂 بۆتەکانم"), KeyboardButton("🔕 کوژاندنی ئاگادارکردنەوەی بۆتم")],
+            [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+        ], resize_keyboard=True)
+        await update.message.reply_text(
+            f"{R}👇 ئاگادارکردنەوەی بۆتەکەت <b>چالاکە</b> — دەتوانیت کوژێنییەوە:",
+            parse_mode="HTML", reply_markup=kb_notif
+        )
     except Exception as e:
         logger.error(f"activate: {e}")
         await sm.edit_text(f"❌ هەڵەیەکی چاوەڕواننەکراو:\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
@@ -1985,18 +2052,26 @@ async def process_child_update(token: str, body: dict):
             # ئاگادارکردنەوەی خاوەنی بۆت کاتی بەکارهێنەری نوێ
             if is_new_user and txt.startswith("/start"):
                 owner_uid = info.get("owner")
-                if owner_uid:
+                notif_on  = info.get("notif_enabled", True)
+                if owner_uid and notif_on:
                     R = "\u200f"
-                    uname_str = f"@{from_user.get('username')}" if from_user.get("username") else "—"
+                    uname_str  = f"@{from_user.get('username')}" if from_user.get("username") else "—"
+                    lang_code  = from_user.get("language_code", "—")
+                    is_premium = "💎 بەڵێ" if from_user.get("is_premium") else "❌ نەخێر"
+                    # ژمارەی کۆی بەکارهێنەران
+                    total_bu = await db_get(f"bot_users/{bid}") or {}
                     notif_msg = (
-                        f"{R}🔔 <b>بەکارهێنەری نوێ!</b>\n"
+                        f"{R}🔔 <b>بەکارهێنەری نوێی بۆتەکەت!</b>\n"
                         f"{R}━━━━━━━━━━━━━━━━━━━\n"
-                        f"{R}👤 ناو: <a href='tg://user?id={user_id}'>{user_name}</a>\n"
-                        f"{R}🆔 ID: <code>{user_id}</code>\n"
-                        f"{R}🔗 یوزەر: {uname_str}\n"
-                        f"{R}🤖 بۆت: @{bun}\n"
-                        f"{R}⏰ کات: {now_str()}\n"
-                        f"{R}━━━━━━━━━━━━━━━━━━━"
+                        f"{R}👤 <b>ناو:</b> <a href='tg://user?id={user_id}'>{user_name}</a>\n"
+                        f"{R}🆔 <b>ID:</b> <code>{user_id}</code>\n"
+                        f"{R}🔗 <b>یوزەر:</b> {uname_str}\n"
+                        f"{R}🌐 <b>زمان:</b> {lang_code}\n"
+                        f"{R}💎 <b>پریمیوم:</b> {is_premium}\n"
+                        f"{R}━━━━━━━━━━━━━━━━━━━\n"
+                        f"{R}🤖 <b>بۆت:</b> @{bun}\n"
+                        f"{R}👥 <b>کۆی بەکارهێنەران:</b> {len(total_bu)} کەس\n"
+                        f"{R}⏰ <b>کات:</b> {now_str()}"
                     )
                     try:
                         await send_tg(MASTER_TOKEN, "sendMessage", {
