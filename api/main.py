@@ -266,7 +266,11 @@ KB_SEC = ReplyKeyboardMarkup([
     [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
-# ── بەشی کانال (جۆینی ناچاری) ─────────────────────────────────────────────
+# ── هەڵبژاردنی جۆری بۆت ──────────────────────────────────────────────────
+KB_BOT_TYPE = ReplyKeyboardMarkup([
+    [KeyboardButton("🍓 بۆتی ڕیاکشن"),   KeyboardButton("🪪 بۆتی زانیاری")],
+    [KeyboardButton("❌ هەڵوەشاندنەوە")],
+], resize_keyboard=True)
 KB_CHAN = ReplyKeyboardMarkup([
     [KeyboardButton("📢 گۆڕینی کانالی سەرەکی"),      KeyboardButton("🔔 چالاككردنی جۆینی ناچاری")],
     [KeyboardButton("🔕 لەکارخستنی جۆینی ناچاری"),   KeyboardButton("➕ زیادکردنی کانالی داواکراو")],
@@ -1014,13 +1018,15 @@ async def show_bot_list(update: Update, uid: int):
 
 async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
     R = "\u200f"  # RTL mark
-    st_icon = "🟢" if info.get("status") == "running" else "🔴"
-    st_txt  = f"{R}چالاک ✅" if info.get("status") == "running" else f"{R}ڕاگیراوە ❌"
-    name    = html.escape(info.get("bot_name", "ناسناو"))
-    un      = info.get("bot_username", "ناسناو")
-    bu      = await db_get(f"bot_users/{bid}") or {}
-    wlcm    = info.get("welcome_msg", "")
-    owner_id = info.get("owner", "")
+    st_icon  = "🟢" if info.get("status") == "running" else "🔴"
+    st_txt   = f"{R}چالاک ✅" if info.get("status") == "running" else f"{R}ڕاگیراوە ❌"
+    name     = html.escape(info.get("bot_name", "ناسناو"))
+    un       = info.get("bot_username", "ناسناو")
+    bu       = await db_get(f"bot_users/{bid}") or {}
+    wlcm     = info.get("welcome_msg", "")
+    btype    = info.get("type", "reaction")
+    notif_on = info.get("notif_enabled", True)
+    type_lbl = "🍓 بۆتی ڕیاکشن" if btype == "reaction" else "🪪 بۆتی زانیاری"
 
     msg = (
         f"{R}⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
@@ -1030,8 +1036,10 @@ async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
         f"{R}🆔 <b>ID:</b> <code>{bid}</code>\n"
         f"{R}━━━━━━━━━━━━━━━━━━━\n"
         f"{R}{st_icon} <b>دۆخ:</b> {st_txt}\n"
+        f"{R}🎯 <b>جۆر:</b> {type_lbl}\n"
         f"{R}👥 <b>بەکارهێنەران:</b> <b>{len(bu)}</b> کەس\n"
         f"{R}✉️ <b>بەخێرهاتن:</b> {'✅ دانراوە' if wlcm else '❌ بەتاڵ'}\n"
+        f"{R}🔔 <b>ئاگادارکردنەوە:</b> {'✅ چالاک' if notif_on else '❌ کوێژاو'}\n"
         f"{R}━━━━━━━━━━━━━━━━━━━"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb_control(uid))
@@ -1167,6 +1175,51 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
     if txt == "❌ هەڵوەشاندنەوە":
         await db_del(f"users/{uid}/state")
         await update.message.reply_text("↩️ هەڵوەشاندرایەوە.", reply_markup=kb_main(uid))
+        return
+
+    # ── هەڵبژاردنی جۆری بۆت ──────────────────────────────────────────────
+    if state == "choose_bot_type":
+        bid = await db_get(f"users/{uid}/pending_bot_id")
+        if not bid:
+            await db_del(f"users/{uid}/state")
+            await update.message.reply_text("❌ هەڵەیەک ڕوویدا.", reply_markup=kb_main(uid))
+            return
+        R = "\u200f"
+        if txt == "🍓 بۆتی ڕیاکشن":
+            binfo = await db_get(f"managed_bots/{bid}") or {}
+            binfo["type"] = "reaction"
+            await db_put(f"managed_bots/{bid}", binfo)
+            await db_del(f"users/{uid}/state")
+            await db_del(f"users/{uid}/pending_bot_id")
+            await db_put(f"users/{uid}/selected_bot", bid)
+            await update.message.reply_text(
+                f"{R}🍓 <b>بۆتی ڕیاکشن هەڵبژێردرا</b>\n\n"
+                f"{R}📌 پێنج هەنگاوی داهاتوو:\n"
+                f"{R}١. بۆتەکەت زیاد بکە بۆ گروپ/کانالەکەت\n"
+                f"{R}٢. ئادمینی تەواوی پێ بدە\n"
+                f"{R}٣. ئینجا بۆ هەموو نامەیەک ئیموجی دەنێرێت 🍓\n"
+                f"{R}🔔 هەربەکارهێنەرێک /start کرد ئاگادار دەکرێیتەوە",
+                parse_mode="HTML", reply_markup=kb_control(uid)
+            )
+        elif txt == "🪪 بۆتی زانیاری":
+            binfo = await db_get(f"managed_bots/{bid}") or {}
+            binfo["type"] = "info"
+            await db_put(f"managed_bots/{bid}", binfo)
+            await db_del(f"users/{uid}/state")
+            await db_del(f"users/{uid}/pending_bot_id")
+            await db_put(f"users/{uid}/selected_bot", bid)
+            await update.message.reply_text(
+                f"{R}🪪 <b>بۆتی زانیاری هەڵبژێردرا</b>\n\n"
+                f"{R}📌 فەرمانەکان:\n"
+                f"{R}▪️ /id — زانیاری تەواوی بەکارهێنەر\n"
+                f"{R}▪️ /info — وەک /id\n\n"
+                f"{R}📌 پێنج هەنگاوی داهاتوو:\n"
+                f"{R}١. بۆتەکەت زیاد بکە بۆ گروپ/کانالەکەت\n"
+                f"{R}٢. ئادمینی تەواوی پێ بدە\n"
+                f"{R}٣. /id بنووسە تا زانیاریت ببینیت 🪪\n"
+                f"{R}🔔 هەربەکارهێنەرێک /start کرد ئاگادار دەکرێیتەوە",
+                parse_mode="HTML", reply_markup=kb_control(uid)
+            )
         return
 
     # ── چاوەڕوانی تۆکێن ───────────────────────────────────────────────────
@@ -2033,10 +2086,10 @@ async def activate_token(update: Update, uid: int, token: str):
             "created": now_str(), "notif_enabled": True,
         })
         await db_del(f"users/{uid}/state")
+        # پاشەکەوتکردنی bid بۆ دۆخی هەڵبژاردنی جۆر
+        await db_put(f"users/{uid}/pending_bot_id", bid)
+        await db_put(f"users/{uid}/state", "choose_bot_type")
         R = "\u200f"
-        # ئامارەکانی سیستەم
-        all_bots = await db_get("managed_bots") or {}
-        all_u    = await db_get("users") or {}
         vip_stat = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
         await sm.edit_text(
             f"{R}🎉 <b>پیرۆزە! بۆتەکەت سەرکەوتووانە دروست کرا</b>\n"
@@ -2050,24 +2103,14 @@ async def activate_token(update: Update, uid: int, token: str):
             f"{R}⏰ <b>کاتی دروستکردن:</b> {now_str()}\n"
             f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
             f"{R}🟢 <b>دۆخ:</b> چالاک و ئامادەیە\n"
-            f"{R}🔔 <b>ئاگادارکردنەوە:</b> ✅ چالاک\n"
-            f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"{R}📌 <b>پێنج هەنگاوی داهاتوو:</b>\n"
-            f"{R}١. بۆتەکەت زیاد بکە بۆ گروپ/کانالەکەت\n"
-            f"{R}٢. ئادمینی تەواوی پێ بدە\n"
-            f"{R}٣. لە '📂 بۆتەکانم' کۆنترۆڵی بکە\n"
-            f"{R}٤. نامەی بەخێرهاتن ئەگەر دەتەوێت گۆڕی\n"
-            f"{R}٥. ئاگادارکردنەوە چالاکە، هەربەکارهێنەرێک /start کرد ئاگادار دەبیت 🔔",
+            f"{R}🔔 <b>ئاگادارکردنەوە:</b> ✅ چالاک",
             parse_mode="HTML",
         )
-        # کیبۆردی کۆنترۆڵ بۆ ئاگادارکردنەوە
-        kb_notif = ReplyKeyboardMarkup([
-            [KeyboardButton("📂 بۆتەکانم"), KeyboardButton("🔕 کوژاندنی ئاگادارکردنەوەی بۆتم")],
-            [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
-        ], resize_keyboard=True)
         await update.message.reply_text(
-            f"{R}👇 ئاگادارکردنەوەی بۆتەکەت <b>چالاکە</b> — دەتوانیت کوژێنییەوە:",
-            parse_mode="HTML", reply_markup=kb_notif
+            f"{R}👇 <b>جۆری بۆتەکەت هەڵبژێرە:</b>\n\n"
+            f"{R}🍓 <b>بۆتی ڕیاکشن</b> — بۆ هەموو نامەیەک ئیموجی دەنێرێت\n"
+            f"{R}🪪 <b>بۆتی زانیاری</b> — فەرمانی /id و /info پشتگیری دەکات",
+            parse_mode="HTML", reply_markup=KB_BOT_TYPE
         )
     except Exception as e:
         logger.error(f"activate: {e}")
@@ -2156,6 +2199,113 @@ async def process_child_update(token: str, body: dict):
                     except: pass
 
         async with httpx.AsyncClient(timeout=10) as c:
+            bot_type = info.get("type", "reaction")
+
+            # ════ بۆتی زانیاری ══════════════════════════════════════════════
+            if bot_type == "info" and txt.startswith(("/id", "/info", "/start")):
+                # پشکنینی جۆینی ناچاری
+                if txt.startswith("/start") and fj and req_chs and from_user.get("id"):
+                    not_joined = []
+                    for ch in req_chs:
+                        try:
+                            res = await send_tg(token, "getChatMember", {"chat_id": f"@{ch}", "user_id": user_id})
+                            status = res.get("result", {}).get("status", "left")
+                            if status not in ("member","administrator","creator"):
+                                not_joined.append(ch)
+                        except:
+                            not_joined.append(ch)
+                    if not_joined:
+                        kb_rows = [[{"text": f"📢 ئەندامبوون لە @{ch}", "url": f"https://t.me/{ch}"}] for ch in not_joined]
+                        join_msg = "\u200f‼️ <b>تکایە سەرەتا ئەندامی کانالەکانمان بە:</b>\n\n"
+                        for ch in not_joined:
+                            join_msg += f"\u200f• @{ch}\n"
+                        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                            "chat_id": chat_id, "text": join_msg, "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": kb_rows},
+                        })
+                        return
+
+                if txt.startswith("/start"):
+                    # بەخێرهاتنی بۆتی زانیاری
+                    notice = await db_get("system/notice")
+                    caption = wlcm.replace("{name}", user_name) if wlcm else (
+                        f"\u200fسڵاو، <a href='tg://user?id={user_id}'>{user_name}</a> 👋\n\n"
+                        f"\u200fمن بۆتی زانیاریم 🪪 ناوم <b>{html.escape(bnm)}</b>ە\n\n"
+                        f"\u200fبۆ زانیاری خۆت بنووسە /id یان /info\n\n"
+                        f"\u200fدەتوانم لە گروپ و کانالدا کار بکەم 🌼"
+                    )
+                    if notice:
+                        caption += f"\n\n\u200f📌 <b>تێبینی:</b> {notice}"
+                    keyboard = {"inline_keyboard": [
+                        [{"text":"📢 کانالی بەڕێوەبەر","url":f"https://t.me/{sys_chan}"}],
+                        [{"text":"➕ زیادکردن بۆ گروپ","url":f"https://t.me/{bun}?startgroup=new"},
+                         {"text":"➕ زیادکردن بۆ کانال","url":f"https://t.me/{bun}?startchannel=new"}],
+                        [{"text":"👨‍💻 بەرنامەنووس","url":f"tg://user?id={OWNER_ID}"}],
+                    ]}
+                    try:
+                        await c.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+                            "chat_id":chat_id,"photo":sys_photo,"caption":caption,
+                            "parse_mode":"HTML","reply_markup":keyboard,"reply_to_message_id":message_id,
+                        })
+                    except:
+                        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                            "chat_id":chat_id,"text":caption,
+                            "parse_mode":"HTML","reply_markup":keyboard,"reply_to_message_id":message_id,
+                        })
+                    return
+
+                # /id یان /info
+                first_name = html.escape(from_user.get("first_name") or "—")
+                uname_str  = f"@{from_user.get('username')}" if from_user.get("username") else "N/A"
+                is_premium = "✅ بەڵێ" if from_user.get("is_premium") else "❌ نەخێر"
+                lang_code  = from_user.get("language_code","—")
+
+                # ستاتوسی کەس لە چات
+                status_txt = "Member"
+                try:
+                    cm_res = await send_tg(token, "getChatMember", {"chat_id": chat_id, "user_id": user_id})
+                    raw_st = cm_res.get("result",{}).get("status","member")
+                    status_map = {
+                        "creator":"👑 خاوەن","administrator":"🛡 ئەدمین",
+                        "member":"👤 ئەندام","restricted":"🚫 سنووردار","left":"↩️ چووەتەوە"
+                    }
+                    status_txt = status_map.get(raw_st, raw_st.title())
+                except: pass
+
+                user_link = f"<a href='tg://user?id={user_id}'>🔗 پرۆفایل</a>"
+                info_text = (
+                    "༶•┈┈┈┈୨🌟୧┈┈┈┈•༶\n\n"
+                    "      -ˏˋ <b>𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘</b> ˊˎ-\n\n"
+                    f"<b>👤 ›› ناو</b> ⵓ {first_name}\n"
+                    f"<b>📧 ›› یوزەر</b> ⵓ {uname_str}\n"
+                    f"<b>🆔 ›› ID</b> ⵓ <code>{user_id}</code>\n"
+                    f"<b>✨ ›› پریمیوم</b> ⵓ {is_premium}\n"
+                    f"<b>🌐 ›› زمان</b> ⵓ {lang_code}\n"
+                    f"<b>🛡️ ›› ڕۆڵ</b> ⵓ {status_txt}\n"
+                    f"<b>🔗 ›› لینک</b> ⵓ {user_link}\n\n"
+                    "༶•┈┈┈┈୨🌟୧┈┈┈┈•༶"
+                )
+                # ناردنی وێنەی پرۆفایل
+                try:
+                    ph_res = await send_tg(token, "getUserProfilePhotos", {"user_id": user_id, "limit": 1})
+                    photos = ph_res.get("result", {}).get("photos", [])
+                    if photos:
+                        photo_id = photos[0][-1]["file_id"]
+                        await c.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+                            "chat_id": chat_id, "photo": photo_id,
+                            "caption": info_text, "parse_mode": "HTML",
+                            "reply_to_message_id": message_id,
+                        })
+                    else:
+                        raise Exception("no photo")
+                except:
+                    await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                        "chat_id": chat_id, "text": info_text, "parse_mode": "HTML",
+                        "reply_to_message_id": message_id, "disable_web_page_preview": True,
+                    })
+                return
+
+            # ════ بۆتی ڕیاکشن ═══════════════════════════════════════════════
             if txt.startswith("/start"):
                 # پشکنینی جۆینی ناچاری کەناڵ
                 if fj and req_chs and from_user.get("id"):
