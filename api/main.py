@@ -1,231 +1,171 @@
-import os, logging, httpx, asyncio, json
+import os, logging, httpx, asyncio, json, random
 from fastapi import FastAPI, Request, BackgroundTasks
-from telegram import Update, Bot
+from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
+from telegram.error import BadRequest, Forbidden
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
-# زانیارییەکان لە Vercel وەردەگرێت
 MASTER_TOKEN = os.getenv("BOT_TOKEN") 
 PROJECT_URL  = os.getenv("PROJECT_URL") 
 DB_URL       = os.getenv("DB_URL") 
 DB_SECRET    = os.getenv("DB_SECRET")
 
-# لۆگین بۆ زانینی کێشەکان
+# زانیارییەکانی بۆتەکەی تۆ
+DEV_ID = 5977475208
+CHANNEL_USER = "j4ck_721s"
+EMOJIS = ["❤️", "🔥", "🎉", "👏", "🤩", "💯"]
+PHOTO_URL = "https://zecora0.serv00.net/photo/photo.jpg"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# ── DATABASE HELPERS (FIREBASE) ───────────────────────────────────────────────
-def fb_url(path):
-    # دروستکردنی لینکی داتابەیس بە شێوەیەکی پارێزراو
-    return f"{DB_URL}/{path}.json?auth={DB_SECRET}"
-
-async def db_get(path):
-    async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(fb_url(path))
-            return r.json() if r.status_code == 200 else None
-        except:
-            return None
+# ── DATABASE HELPERS ──────────────────────────────────────────────────────────
+def fb_url(path): return f"{DB_URL}/{path}.json?auth={DB_SECRET}"
 
 async def db_put(path, data):
     async with httpx.AsyncClient() as client:
-        try:
-            await client.put(fb_url(path), json=data)
-        except:
-            pass
-
-async def db_del(path):
-    async with httpx.AsyncClient() as client:
-        try:
-            await client.delete(fb_url(path))
-        except:
-            pass
+        try: await client.put(fb_url(path), json=data)
+        except: pass
 
 # ==============================================================================
-# ── 1. MASTER BOT LOGIC (بۆتە سەرەکییەکە)
+# ── 1. MASTER BOT (دروستکەری بۆت)
 # ==============================================================================
 async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 بەخێربێیت بۆ بۆت مەیکەری وەڵامدانەوە!\n\n"
-        "تکایە تۆکێنی بۆتەکەت بنێرە (Bot Token)، من دەیکەم بە بۆتێکی وەڵامدانەوەی خۆکار.\n\n"
-        "تۆکێن لە @BotFather وەربگرە و لێرە بینێرە."
+        "👋 **بەخێربێیت بۆ بۆت مەیکەری ڕیاکشن!**\n\n"
+        "تەنها تۆکێنی بۆتەکەت بنێرە، من دەیکەم بە بۆتێکی ڕیاکشن (Reaction Bot).\n"
+        "بۆتەکە وەڵامی /start دەداتەوە و ڕیاکشن بۆ هەموو نامەیەک دەکات."
     )
 
 async def handle_master_messages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     token = update.message.text.strip()
-    
-    # پشکنینی سەرەتایی تۆکێن
     if ":" not in token or len(token) < 20:
-        await update.message.reply_text("❌ تۆکێنەکە نادروستە! دڵنیابە کۆپییەکی ڕاستت ناردووە."); return
+        await update.message.reply_text("❌ تۆکێنەکە نادروستە!"); return
 
     status = await update.message.reply_text("⏳ خەریکی چالاککردنم...")
-    
     try:
-        # پشکنینی ڕاستی تۆکێنەکە
+        # پشکنینی تۆکێن
         bot_user = Bot(token=token)
         me = await bot_user.get_me()
         
-        # بەستنەوەی وەبهووک بە سێرڤەری ئێمەوە
+        # بەستنەوەی وەبهووک
         webhook_url = f"{PROJECT_URL}/api/child_bot?token={token}"
         await bot_user.set_webhook(url=webhook_url)
         
-        # پاشەکەوتکردنی زانیاری لە داتابەیس
+        # تۆمارکردن لە داتابەیس
         bot_id_str = str(me.id)
-        await db_put(f"managed_bots/{bot_id_str}", {
-            "token": token,
-            "owner_id": update.effective_user.id,
-            "bot_username": me.username
-        })
+        await db_put(f"managed_bots/{bot_id_str}", {"token": token, "owner": update.effective_user.id})
 
-        # ناردنی پەیامی سەرکەوتن بەبێ ئەستێرە (**)
-        msg = (
-            f"✅ بۆتەکەت چالاک کرا!\n\n"
+        await status.edit_text(
+            f"✅ **بۆتەکەت چالاک کرا!**\n\n"
             f"🤖 ناو: {me.first_name}\n"
             f"🔗 یوزەر: @{me.username}\n\n"
-            f"⚙️ ڕێنمایی بەکارهێنان:\n"
-            f"بڕۆ ناو بۆتە نوێیەکەت و ئەم فەرمانانە بنووسە:\n\n"
-            f"1. زیادکردنی وەڵام:\n"
-            f"/add کلیل وەڵام\n"
-            f"نموونە: /add سڵاو بەخێربێیت بۆ چەناڵەکەمان\n\n"
-            f"2. سڕینەوەی وەڵام:\n"
-            f"/del کلیل\n\n"
-            f"3. بینینی وەڵامەکان:\n"
-            f"/list"
+            f"🍓 **ئێستا بۆتەکەت چی دەکات؟**\n"
+            f"١. وەڵامی `/start` دەداتەوە بە وێنە و دوگمە.\n"
+            f"٢. ڕیاکشن (Reaction) بۆ هەموو نامەیەک دەکات."
         )
-        await status.edit_text(msg)
-        
     except Exception as e:
-        await status.edit_text(f"❌ هەڵە ڕوویدا: {str(e)}")
+        await status.edit_text(f"❌ هەڵە: {str(e)}")
 
-# دروستکردنی ئەپی بۆتە سەرەکییەکە
 master_app = ApplicationBuilder().token(MASTER_TOKEN).build()
 master_app.add_handler(CommandHandler("start", master_start))
 master_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_master_messages))
 
-
 # ==============================================================================
-# ── 2. CHILD BOT LOGIC (بۆتە دروستکراوەکان)
+# ── 2. CHILD BOT LOGIC (لۆجیکی بۆتە دروستکراوەکان)
 # ==============================================================================
 async def process_child_update(token: str, body: dict):
-    """
-    ئەم بەشە بەرپرسە لە بەڕێوەبردنی هەموو ئەو بۆتانەی دروست دەکرێن
-    """
     try:
-        # دروستکردنی پەیوەندی کاتی
         bot = Bot(token=token)
         update = Update.de_json(body, bot)
         
-        if not update.message or not update.message.text:
+        # ئەگەر نامە نەبێت یان پۆستی چەناڵ نەبێت، هیچی پێ ناکرێت
+        if not (update.message or update.channel_post):
             return
+
+        # دیاریکردنی جۆری پەیام (چات یان چەناڵ)
+        msg = update.message if update.message else update.channel_post
+        chat_id = msg.chat_id
+        message_id = msg.message_id
+        text = msg.text or ""
         
-        text = update.message.text
-        chat_id = update.message.chat_id
+        # زانیاری بەکارهێنەر (ئەگەر لە چەناڵ نەبوو)
+        user_name = msg.from_user.first_name if msg.from_user else "Subscriber"
+        user_id = msg.from_user.id if msg.from_user else 0
         bot_info = await bot.get_me()
-        bot_id_str = str(bot_info.id)
+        bot_username = bot_info.username
+        bot_name = bot_info.first_name
 
-        # ─── فەرمانەکان ───
-
-        # 1. زیادکردن (/add)
-        if text.startswith("/add"):
-            parts = text.split(" ", 2)
-            if len(parts) < 3:
-                await bot.send_message(chat_id, "⚠️ هەڵە! تکایە ئاوا بنووسە:\n/add کلیل وەڵام")
-                return
+        # --- ئەگەر فەرمانی /start بوو ---
+        if text == '/start':
+            # دروستکردنی دوگمەکان
+            keyboard = [
+                [InlineKeyboardButton("My channel ✌", url=f"https://t.me/{CHANNEL_USER}")],
+                [
+                    InlineKeyboardButton("ᵃᵈᵈ ᵐᵉ ᵗᵒ ʸᵒᵘʳ ᵍʳᵒᵘᵖ ✨", url=f"https://t.me/{bot_username}?startgroup=new"),
+                    InlineKeyboardButton("ᵃᵈᵈ ᵐᵉ ᵗᵒ ʸᵒᵘʳ ᶜʰᵃᶰᶰᵉˡ 🎶", url=f"https://t.me/{bot_username}?startchannel=new")
+                ],
+                [InlineKeyboardButton('ᵖʳᵒᵍʳᵃᵐᵐᵉʳ 🎧 ', url=f"tg://user?id={DEV_ID}")]
+            ]
             
-            keyword = parts[1] # ئەو وشەیەی دەینێرن
-            answer = parts[2]  # ئەو وەڵامەی بۆتەکە دەیداتەوە
-            
-            # خەزنکردن لە داتابەیس
-            # ڕێڕەو: replies -> bot_id -> keyword
-            await db_put(f"replies/{bot_id_str}/{keyword}", answer)
-            await bot.send_message(chat_id, f"✅ وەڵام بۆ وشەی '{keyword}' زیاد کرا.")
-            return
-
-        # 2. سڕینەوە (/del)
-        if text.startswith("/del"):
-            keyword = text.replace("/del", "").strip()
-            if not keyword:
-                await bot.send_message(chat_id, "⚠️ تکایە وشەکە بنووسە. نموونە:\n/del سڵاو")
-                return
-            
-            await db_del(f"replies/{bot_id_str}/{keyword}")
-            await bot.send_message(chat_id, f"🗑 وشەی '{keyword}' سڕایەوە.")
-            return
-
-        # 3. لیست (/list)
-        if text == "/list":
-            data = await db_get(f"replies/{bot_id_str}")
-            if not data:
-                await bot.send_message(chat_id, "📭 هیچ وەڵامێک زیاد نەکراوە.")
-                return
-            
-            msg = "📋 لیستی وەڵامەکان:\n\n"
-            for k, v in data.items():
-                msg += f"🔹 {k} ➡️ {v}\n"
-            await bot.send_message(chat_id, msg)
-            return
-
-        # 4. یارمەتی (/help)
-        if text == "/help" or text == "/start":
-            msg = (
-                "👋 بەخێربێیت! من بۆتی وەڵامدانەوەم.\n\n"
-                "فەرمانەکان:\n"
-                "/add کلیل وەڵام - زیادکردنی وەڵام\n"
-                "/del کلیل - سڕینەوەی وەڵام\n"
-                "/list - بینینی هەموو وەڵامەکان"
+            # نووسینی کەپشنەکە
+            caption = (
+                f"Hi dear, [{user_name}](tg://user?id={user_id})\n\n"
+                f"I'm a reaction bot 🍓, my name is {bot_name}\n"
+                f"My job is to interact with messages using {' '.join(EMOJIS)}\n"
+                f"I can interact in groups, channels and private chats 🌼\n"
+                f"Just add me to your group or channel and make me an admin with simple permissions ☘️\n"
+                f"And I will interact with every message you send. Try me now 💗"
             )
-            await bot.send_message(chat_id, msg)
-            return
 
-        # ─── وەڵامدانەوەی خۆکار ───
+            try:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=PHOTO_URL,
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    reply_to_message_id=message_id
+                )
+            except Exception as e:
+                logger.error(f"Error sending start message: {e}")
         
-        # هێنانی هەموو وەڵامەکانی ئەم بۆتە
-        all_replies = await db_get(f"replies/{bot_id_str}")
-        
-        if all_replies and text in all_replies:
-            # ئەگەر وشەکە هەبوو، وەڵام دەداتەوە
-            await bot.send_message(chat_id, all_replies[text])
+        # --- بۆ هەموو نامەکانی تر: ڕیاکشن ---
+        else:
+            try:
+                random_emoji = random.choice(EMOJIS)
+                await bot.set_message_reaction(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reaction=[ReactionTypeEmoji(random_emoji)]
+                )
+            except BadRequest:
+                # ئەگەر ڕیاکشن قەدەغە بێت یان بۆتەکە ئەدمین نەبێت
+                pass
+            except Exception as e:
+                logger.error(f"Error reacting: {e}")
 
     except Exception as e:
-        logger.error(f"Child Bot Error: {e}")
+        logger.error(f"General Child Bot Error: {e}")
 
 # ==============================================================================
-# ── 3. FASTAPI ROUTES (ڕاوتەرەکان)
+# ── 3. ROUTES
 # ==============================================================================
-
 @app.post("/api/main")
-async def master_webhook_handler(request: Request):
-    """وەبەهووک بۆ بۆتە سەرەکییەکە (Master Bot)"""
-    try:
-        if not master_app.running:
-            await master_app.initialize()
-        
-        data = await request.json()
-        await master_app.process_update(Update.de_json(data, master_app.bot))
-        return {"ok": True}
-    except Exception as e:
-        logger.error(f"Master Webhook Error: {e}")
-        return {"ok": False}
-
+async def master_route(request: Request):
+    if not master_app.running: await master_app.initialize()
+    data = await request.json()
+    await master_app.process_update(Update.de_json(data, master_app.bot))
+    return {"ok": True}
 
 @app.post("/api/child_bot")
-async def child_webhook_handler(request: Request, token: str, background_tasks: BackgroundTasks):
-    """
-    وەبەهووک بۆ بۆتە دروستکراوەکان (Child Bots).
-    Vercel پارامیتەری 'token' دەنێرێت، ئێمەش دەینێرین بۆ 'process_child_update'.
-    """
-    try:
-        data = await request.json()
-        # بەکارهێنانی BackgroundTasks بۆ خێرایی
-        background_tasks.add_task(process_child_update, token, data)
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
+async def child_route(request: Request, token: str, background_tasks: BackgroundTasks):
+    data = await request.json()
+    background_tasks.add_task(process_child_update, token, data)
+    return {"ok": True}
 
 @app.get("/api/main")
-async def health_check():
-    return {"status": "Active", "mode": "Auto Reply Bot Maker"}
+async def health(): return {"status": "Reaction Bot Maker Running"}
