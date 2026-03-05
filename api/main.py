@@ -15,6 +15,7 @@ DB_SECRET    = os.getenv("DB_SECRET")
 OWNER_ID     = 5977475208
 CHANNEL_USER = "j4ck_721s"
 EMOJIS       = ["❤️","🔥","🎉","👏","🤩","💯","😍","🫶","⚡","🌟"]
+PHOTO_URL    = "https://jobin-bro-143-02-7e44d11483ed.herokuapp.com//dl/24585?code=21c8667075cad1c405c844a32363059fc6f15bd353cfbea4"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -95,31 +96,51 @@ async def is_vip(uid: int) -> bool:
     except: return False
 
 async def is_admin(uid: int) -> bool:
-    """پشکنینی ئەدمینبوون بۆ بۆتی سەرەکی"""
+    """پشکنینی ئەیا بەکارهێنەر ئەدمینی سیستەمە"""
     if uid == OWNER_ID: return True
-    admins = await db_get("system/admins") or {}
+    admins = await db_get("admins") or {}
     return str(uid) in admins
 
 def now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
-async def check_force_join(uid: int, token: str) -> list:
-    """دەگەڕێتەوە لیستی کانالە دەرچووەکان"""
+# ══════════════════════════════════════════════════════════════════════════════
+# ── پشکنینی جۆینی ناچاری کەناڵ
+# ══════════════════════════════════════════════════════════════════════════════
+async def check_force_join(uid: int) -> tuple[bool, list]:
+    """پشکنین ئەیا بەکارهێنەر ئەندامی هەموو کانالە داواکراوەکانە"""
     fj = await db_get("system/force_join")
-    if not fj: return []
+    if not fj: return True, []
     req_chs = await db_get("system/req_channels") or {}
+    if not req_chs: return True, []
     not_joined = []
     for ch in req_chs:
-        res = await send_tg(token, "getChatMember", {"chat_id": f"@{ch}", "user_id": uid})
-        status = res.get("result", {}).get("status", "left")
-        if status in ("left", "kicked"):
+        try:
+            res = await send_tg(MASTER_TOKEN, "getChatMember", {"chat_id": f"@{ch}", "user_id": uid})
+            status = res.get("result", {}).get("status", "left")
+            if status not in ("member", "administrator", "creator"):
+                not_joined.append(ch)
+        except:
             not_joined.append(ch)
-    return not_joined
+    return len(not_joined) == 0, not_joined
+
+async def send_force_join_msg(update: Update, not_joined: list):
+    """ناردنی پەیامی داوای جۆین"""
+    lines = ["‼️ <b>تکایە سەرەتا ئەندامی کانالەکانمان بە:</b>\n"]
+    keyboard_rows = []
+    for ch in not_joined:
+        lines.append(f"📢 @{ch}")
+        keyboard_rows.append([{"text": f"➕ ئەندامبوون لە @{ch}", "url": f"https://t.me/{ch}"}])
+    keyboard_rows.append([{"text": "✅ پشکنینی ئەندامبوون", "callback_data": "check_join"}])
+    msg = "\n".join(lines) + "\n\n📌 دوای ئەندامبوون، دووبارە /start بنووسە"
+    await update.message.reply_text(msg, parse_mode="HTML",
+        reply_markup={"inline_keyboard": keyboard_rows} if False else None)
+    # بە سادەیی بێ inline keyboard پەیامەکە دەنێرین
+    kb = ReplyKeyboardMarkup([[KeyboardButton("🔄 پشکنینی دووبارە")]], resize_keyboard=True)
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ══════════════════════════════════════════════════════════════════════════════
 # ██  کیبۆردەکان
-# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── مینیوی سەرەکی ──────────────────────────────────────────────────────────
@@ -129,16 +150,17 @@ def kb_main(uid: int) -> ReplyKeyboardMarkup:
             [KeyboardButton("➕ دروستکردنی بۆتی نوێ"),  KeyboardButton("📂 بۆتەکانم")],
             [KeyboardButton("👑 پانێلی سەرەکی"),         KeyboardButton("📊 ئامارەکان")],
         ], resize_keyboard=True)
+    # پشکنینی ئەیا ئەدمینە
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ دروستکردنی بۆتی نوێ"), KeyboardButton("📂 بۆتەکانم")],
         [KeyboardButton("📊 ئامارەکانم")],
     ], resize_keyboard=True)
 
-def kb_admin_main() -> ReplyKeyboardMarkup:
+def kb_main_admin(uid: int) -> ReplyKeyboardMarkup:
     """کیبۆردی ئەدمین"""
     return ReplyKeyboardMarkup([
         [KeyboardButton("➕ دروستکردنی بۆتی نوێ"),  KeyboardButton("📂 بۆتەکانم")],
-        [KeyboardButton("🔧 پانێلی ئەدمین"),         KeyboardButton("📊 ئامارەکانم")],
+        [KeyboardButton("🛡 پانێلی ئەدمین"),          KeyboardButton("📊 ئامارەکانم")],
     ], resize_keyboard=True)
 
 # ── کۆنترۆڵی بۆت ─────────────────────────────────────────────────────────
@@ -158,15 +180,37 @@ KB_OWNER_MAIN = ReplyKeyboardMarkup([
     [KeyboardButton("👥 بەشی بەکارهێنەران"),   KeyboardButton("🤖 بەشی بۆتەکان")],
     [KeyboardButton("📨 بەشی پەیام"),           KeyboardButton("💎 بەشی VIP")],
     [KeyboardButton("🛡 بەشی ئەمنیەت"),         KeyboardButton("📢 بەشی کانال")],
-    [KeyboardButton("⚙️ بەشی سیستەم"),          KeyboardButton("👮 بەشی ئەدمینەکان")],
-    [KeyboardButton("📊 ئامارەکان"),             KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+    [KeyboardButton("⚙️ بەشی سیستەم"),          KeyboardButton("📊 ئامارەکان")],
+    [KeyboardButton("👨‍💼 بەشی ئەدمینەکان"),     KeyboardButton("🔔 بەشی ئاگادارکردنەوە")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
 ], resize_keyboard=True)
 
 # ── پانێلی ئەدمین ──────────────────────────────────────────────────────────
 KB_ADMIN_PANEL = ReplyKeyboardMarkup([
-    [KeyboardButton("👥 بەشی بەکارهێنەران"),   KeyboardButton("🤖 بەشی بۆتەکان")],
-    [KeyboardButton("📨 بەشی پەیام"),           KeyboardButton("💎 بەشی VIP")],
-    [KeyboardButton("📢 بەشی کانال"),           KeyboardButton("📊 ئامارەکان")],
+    [KeyboardButton("👥 لیستی بەکارهێنەران"),   KeyboardButton("🤖 لیستی بۆتەکان")],
+    [KeyboardButton("💎 بەشی VIP"),              KeyboardButton("🚫 بلۆک بەکارهێنەر")],
+    [KeyboardButton("📨 بڵاوکردنەوە بۆ هەموو"), KeyboardButton("🔔 ئاگادارکردنەوە")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+], resize_keyboard=True)
+
+# ── بەشی ئەدمینەکان ────────────────────────────────────────────────────────
+KB_ADMINS = ReplyKeyboardMarkup([
+    [KeyboardButton("👨‍💼 لیستی ئەدمینەکان"),    KeyboardButton("➕ زیادکردنی ئەدمین")],
+    [KeyboardButton("➖ لابردنی ئەدمین"),        KeyboardButton("📊 ئامارەکانی ئەدمینەکان")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
+], resize_keyboard=True)
+
+# ── بەشی ئاگادارکردنەوە ────────────────────────────────────────────────────
+KB_NOTIF = ReplyKeyboardMarkup([
+    [KeyboardButton("🔔 ئاگادارکردنەوەی گشتی"),  KeyboardButton("📌 ئاگادارکردنەوەی VIP")],
+    [KeyboardButton("⚠️ ئاگادارکردنەوەی بەکارهێنەر"), KeyboardButton("📋 مێژووی ئاگادارکردنەوە")],
+    [KeyboardButton("🔔 چالاككردنی ئاگادارکردنەوە"), KeyboardButton("🔕 لەکارخستنی ئاگادارکردنەوە")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
+], resize_keyboard=True)
+
+KB_NOTIF_USER = ReplyKeyboardMarkup([
+    [KeyboardButton("🔔 ئاگادارکردنەوەکانم"),    KeyboardButton("🔕 کوژاندنەوەی ئاگادارکردنەوە")],
+    [KeyboardButton("📋 مێژووی ئاگادارکردنەوە")],
     [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
 ], resize_keyboard=True)
 
@@ -233,25 +277,23 @@ KB_SYS = ReplyKeyboardMarkup([
     [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
-# ── بەشی ئەدمینەکان ────────────────────────────────────────────────────────
-KB_ADMINS = ReplyKeyboardMarkup([
-    [KeyboardButton("👮 لیستی ئەدمینەکان"),          KeyboardButton("➕ زیادکردنی ئەدمین")],
-    [KeyboardButton("➖ لابردنی ئەدمین"),             KeyboardButton("📋 زانیاری ئەدمین بە ID")],
-    [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
-], resize_keyboard=True)
-
-# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 # ██  /start
-# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid  = update.effective_user.id
     name = html.escape(update.effective_user.first_name or "بەکارهێنەر")
 
     if await is_blocked(uid):
-        await update.message.reply_text("‏🚫 دەستت لە بۆتەکە گرتراوە.")
+        await update.message.reply_text("🚫 دەستت لە بۆتەکە گرتراوە.")
         return
+
+    # پشکنینی جۆینی ناچاری کەناڵ بۆ بەکارهێنەرانی ئاسایی
+    if uid != OWNER_ID and not await is_admin(uid):
+        joined, not_joined = await check_force_join(uid)
+        if not joined:
+            await send_force_join_msg(update, not_joined)
+            return
 
     await db_del(f"users/{uid}/state")
     await db_patch(f"users/{uid}", {
@@ -261,61 +303,52 @@ async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "last_seen": now_str(),
     })
 
-    # پشکنینی فۆرس جۆین
-    not_joined = await check_force_join(uid, MASTER_TOKEN)
-    if not_joined and uid != OWNER_ID:
-        await send_force_join_msg(update, not_joined)
-        return
-
     vip_badge = " 💎" if await is_vip(uid) else ""
-    admin_user = await is_admin(uid)
+    admin_badge = " 🛡" if (await is_admin(uid) and uid != OWNER_ID) else ""
 
     if uid == OWNER_ID:
+        # خێراکردن بۆ خاوەنی بۆت - داتا لە یەک جار دەگرین
+        all_b = await db_get("managed_bots") or {}
+        all_u = await db_get("users") or {}
+        run   = sum(1 for v in all_b.values() if v.get("status") == "running")
+        admins = await db_get("admins") or {}
         txt = (
-            f"‏👑 <b>بەخێربێیت خاوەنی سیستەم، {name}!</b>\n\n"
-            "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-            "‏🎛 پانێلی سەرەکی — کۆنترۆڵی تەواوی سیستەم\n"
-            "‏👇 هەڵبژاردنێک بکە:"
+            f"‼️ <b>بەخێربێیت خاوەنی سیستەم، {name}!</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
+            f"🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
+            f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎛 پانێلی سەرەکی — کۆنترۆڵی تەواوی سیستەم\n"
+            "👇 هەڵبژاردنێک بکە:"
         )
         await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
-    elif admin_user:
+    elif await is_admin(uid):
         txt = (
-            f"‏👮 <b>بەخێربێیت ئەدمین، {name}!</b>\n\n"
-            "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-            "‏🔧 پانێلی ئەدمین — کۆنترۆڵی بەشی بۆتەکان\n"
-            "‏👇 هەڵبژاردنێک بکە:"
+            f"‼️ <b>بەخێربێیت، ئەدمین {name}{admin_badge}!</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🛡 دەستتە بۆ پانێلی ئەدمین\n"
+            "🤖 دروستکردنی بۆتی تایبەتی خۆت\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 لە کیبۆردی خوارەوە هەڵبژێرە:"
         )
-        await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_admin_main())
+        await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main_admin(uid))
     else:
+        vip_speed = "⚡ خێرا" if await is_vip(uid) else "🐢 ئاسایی"
         txt = (
-            f"‏👋 <b>بەخێربێیت، {name}{vip_badge}!</b>\n\n"
-            "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-            "‏🤖 دروستکردنی بۆتی تایبەتی خۆت\n"
-            "‏⚙️ کۆنترۆڵی تەواوی بۆتەکەت\n"
-            "‏📨 ناردنی پەیام بۆ بەکارهێنەرانی بۆتەکەت\n"
-            "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-            "‏👇 لە کیبۆردی خوارەوە هەڵبژێرە:"
+            f"‼️ <b>بەخێربێیت، {name}{vip_badge}!</b>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 دروستکردنی بۆتی تایبەتی خۆت\n"
+            "⚙️ کۆنترۆڵی تەواوی بۆتەکەت\n"
+            "📨 ناردنی پەیام بۆ بەکارهێنەرانی بۆتەکەت\n"
+            f"🚀 خێرایی: {vip_speed}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 لە کیبۆردی خوارەوە هەڵبژێرە:"
         )
         await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
 
-async def send_force_join_msg(update: Update, not_joined: list):
-    """ناردنی پەیامی فۆرس جۆین"""
-    sys_chan = await db_get("system/channel") or CHANNEL_USER
-    lines = ["‏📢 <b>تکایە سەرەتا ئەندامی کانالەکان بە:</b>\n"]
-    keyboard_btns = []
-    for ch in not_joined:
-        lines.append(f"‏• @{ch}")
-        keyboard_btns.append([{"text": f"‏➕ ئەندام بە @{ch}", "url": f"https://t.me/{ch}"}])
-    keyboard_btns.append([{"text": "‏✅ پشکنینی ئەندامبوون", "callback_data": "check_join"}])
-    await update.message.reply_text(
-        "\n".join(lines) + "\n\n‏⬆️ دوای ئەندامبوون، /start بنووسە",
-        parse_mode="HTML"
-    )
-
-# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 # ██  handler ی سەرەکی
-# ══════════════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════════════
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     txt   = update.message.text.strip()
@@ -323,13 +356,19 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = await db_get(f"users/{uid}/state") or ""
 
     if await is_blocked(uid):
-        await update.message.reply_text("‏🚫 دەستت لە بۆتەکە گرتراوە.")
+        await update.message.reply_text("🚫 دەستت لە بۆتەکە گرتراوە.")
         return
 
-    # پشکنینی فۆرس جۆین
-    not_joined = await check_force_join(uid, MASTER_TOKEN)
-    if not_joined and uid != OWNER_ID and not await is_admin(uid):
-        await send_force_join_msg(update, not_joined)
+    # پشکنینی دووبارەی جۆینی کەناڵ
+    if txt == "🔄 پشکنینی دووبارە":
+        if uid != OWNER_ID and not await is_admin(uid):
+            joined, not_joined = await check_force_join(uid)
+            if not joined:
+                await send_force_join_msg(update, not_joined)
+            else:
+                await master_start(update, ctx)
+        else:
+            await master_start(update, ctx)
         return
 
     # ── ناڤیگەیشنی گشتی ───────────────────────────────────────────────────
@@ -343,23 +382,31 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await show_bot_list(update, uid)
         return
 
-    if txt == "🔙 گەڕانەوە بۆ پانێلی سەرەکی":
+    if txt == "🔙 گەڕانەوە بۆ پانێلی سەرەکی" and uid == OWNER_ID:
         await db_del(f"users/{uid}/state")
-        if uid == OWNER_ID:
-            await show_owner_main(update)
-        elif await is_admin(uid):
-            await update.message.reply_text("‏🔧 <b>پانێلی ئەدمین</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_ADMIN_PANEL)
+        await show_owner_main(update)
+        return
+
+    if txt == "🔙 گەڕانەوە بۆ پانێلی سەرەکی" and await is_admin(uid):
+        await db_del(f"users/{uid}/state")
+        await update.message.reply_text("🛡 پانێلی ئەدمین:", reply_markup=KB_ADMIN_PANEL)
         return
 
     # ── دروستکردنی بۆتی نوێ ───────────────────────────────────────────────
     if txt == "➕ دروستکردنی بۆتی نوێ":
+        # پشکنینی جۆینی ناچاری کەناڵ
+        if uid != OWNER_ID and not await is_admin(uid):
+            joined, not_joined = await check_force_join(uid)
+            if not joined:
+                await send_force_join_msg(update, not_joined)
+                return
         kb = ReplyKeyboardMarkup([
             [KeyboardButton("🍓 بۆتی ڕیاکشن")],
             [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
         ], resize_keyboard=True)
         await update.message.reply_text(
-            "‏🤖 <b>جۆری بۆت هەڵبژێرە:</b>\n\n"
-            "‏🍓 <b>بۆتی ڕیاکشن</b> — بۆ هەموو نامەیەک ئیموجی دەنێرێت ❤️",
+            "🤖 <b>جۆری بۆت هەڵبژێرە:</b>\n\n"
+            "🍓 <b>بۆتی ڕیاکشن</b> — بۆ هەموو نامەیەک ئیموجی دەنێرێت ❤️",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -368,13 +415,13 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await db_put(f"users/{uid}/state", "await_token")
         kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
         await update.message.reply_text(
-            "‏🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
-            "‏📋 <b>مامەڵەکە:</b>\n"
-            "‏١. بچۆ بۆ @BotFather لە تێلیگرام\n"
-            "‏٢. بنووسە /newbot\n"
-            "‏٣. ناوی بۆتەکەت دابنێ\n"
-            "‏٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
-            "‏⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
+            "🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
+            "📋 <b>مامەڵەکە:</b>\n"
+            "١. بچۆ بۆ @BotFather لە تێلیگرام\n"
+            "٢. بنووسە /newbot\n"
+            "٣. ناوی بۆتەکەت دابنێ\n"
+            "٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
+            "⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -391,7 +438,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         bid   = next((k for k, v in all_b.items()
                       if v.get("owner") == uid and v.get("bot_username") == uname), None)
         if not bid:
-            await update.message.reply_text("‏❌ بۆتەکە نەدۆزرایەوە!", reply_markup=kb_main(uid))
+            await update.message.reply_text("❌ بۆتەکە نەدۆزرایەوە!", reply_markup=kb_main(uid))
             return
         await db_put(f"users/{uid}/selected_bot", bid)
         await show_bot_control(update, uid, bid, all_b[bid])
@@ -412,42 +459,28 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await show_stats(update, uid)
         return
 
-    # ════════════════════════════════════════════════════════════════════════
-    # پانێلی ئەدمین (بۆ ئەدمینەکان تەنها)
-    # ════════════════════════════════════════════════════════════════════════
-    admin_user = await is_admin(uid)
-    if admin_user and uid != OWNER_ID:
-        if txt == "🔧 پانێلی ئەدمین":
-            await update.message.reply_text("‏🔧 <b>پانێلی ئەدمین</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_ADMIN_PANEL)
-            return
-        if txt == "👥 بەشی بەکارهێنەران":
-            await update.message.reply_text("‏👥 <b>بەشی بەکارهێنەران</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_USERS)
-            return
-        if txt == "🤖 بەشی بۆتەکان":
-            await update.message.reply_text("‏🤖 <b>بەشی بۆتەکان</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_BOTS)
-            return
-        if txt == "📨 بەشی پەیام":
-            await update.message.reply_text("‏📨 <b>بەشی پەیام</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_MSG)
-            return
-        if txt == "💎 بەشی VIP":
-            await update.message.reply_text("‏💎 <b>بەشی VIP</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_VIP)
-            return
-        if txt == "📢 بەشی کانال":
-            await update.message.reply_text("‏📢 <b>بەشی کانال</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_CHAN)
-            return
+    # ── پانێلی ئەدمین (بۆ ئەدمینەکان) ───────────────────────────────────
+    if txt == "🛡 پانێلی ئەدمین" and await is_admin(uid) and uid != OWNER_ID:
+        await update.message.reply_text("🛡 <b>پانێلی ئەدمین</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_ADMIN_PANEL)
+        return
+
+    # ── بەشی ئاگادارکردنەوە (بۆ بەکارهێنەران) ──────────────────────────
+    if txt == "🔔 ئاگادارکردنەوەکانم":
+        await show_user_notifications(update, uid)
+        return
 
     # ════════════════════════════════════════════════════════════════════════
     # پانێلی سەرەکی و بەشەکانی (تەنها Owner)
     # ════════════════════════════════════════════════════════════════════════
-    if uid == OWNER_ID or admin_user:
+    if uid == OWNER_ID:
         # ── مینیوی سەرەکی ─────────────────────────────────────────────────
-        if txt == "👑 پانێلی سەرەکی" and uid == OWNER_ID:
+        if txt == "👑 پانێلی سەرەکی":
             await show_owner_main(update)
             return
 
         # ════ بەشی بەکارهێنەران ════════════════════════════════════════════
         if txt == "👥 بەشی بەکارهێنەران":
-            await update.message.reply_text("‏👥 <b>بەشی بەکارهێنەران</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_USERS)
+            await update.message.reply_text("👥 <b>بەشی بەکارهێنەران</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_USERS)
             return
         if txt == "👥 لیستی هەموو بەکارهێنەران":
             await owner_list_users(update, full=True)
@@ -455,12 +488,12 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "🔍 گەڕان بۆ بەکارهێنەر":
             await db_put(f"users/{uid}/state", "search_user")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🔍 ناو یان یوزەرنەیم یان ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🔍 ناو یان یوزەرنەیم یان ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "📋 زانیاری بەکارهێنەر بە ID":
             await db_put(f"users/{uid}/state", "user_info_id")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "📊 ئامارەکانی بەکارهێنەران":
             await owner_user_stats(update)
@@ -468,7 +501,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "🗑 سڕینەوەی بەکارهێنەر":
             await db_put(f"users/{uid}/state", "del_user")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەرەکە بنووسە تا بیسڕیتەوە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە تا بیسڕیتەوە:", reply_markup=kb)
             return
         if txt == "📤 هەناردەکردنی لیست":
             await owner_export_users(update)
@@ -476,7 +509,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ════ بەشی بۆتەکان ════════════════════════════════════════════════
         if txt == "🤖 بەشی بۆتەکان":
-            await update.message.reply_text("‏🤖 <b>بەشی بۆتەکان</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_BOTS)
+            await update.message.reply_text("🤖 <b>بەشی بۆتەکان</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_BOTS)
             return
         if txt == "🤖 لیستی هەموو بۆتەکان":
             await owner_list_bots(update, filter_status=None)
@@ -499,58 +532,58 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "🗑 سڕینەوەی بۆت بە ID":
             await db_put(f"users/{uid}/state", "owner_del_bot")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بۆتەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بۆتەکە بنووسە:", reply_markup=kb)
             return
         if txt == "🔍 گەڕان بۆ بۆت":
             await db_put(f"users/{uid}/state", "search_bot")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🔍 یوزەرنەیم یان ID ی بۆتەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🔍 یوزەرنەیم یان ID ی بۆتەکە بنووسە:", reply_markup=kb)
             return
 
         # ════ بەشی پەیام ══════════════════════════════════════════════════
         if txt == "📨 بەشی پەیام":
-            await update.message.reply_text("‏📨 <b>بەشی پەیام</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_MSG)
+            await update.message.reply_text("📨 <b>بەشی پەیام</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_MSG)
             return
         if txt == "📨 بڵاوکردنەوە بۆ هەموو":
             await db_put(f"users/{uid}/state", "bc_all")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏📨 <b>بڵاوکردنەوە بۆ هەموو</b>\n\n‏پەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("📨 <b>بڵاوکردنەوە بۆ هەموو</b>\n\nپەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "📨 بڵاوکردنەوە بۆ VIP":
             await db_put(f"users/{uid}/state", "bc_vip")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏💎 <b>بڵاوکردنەوە بۆ VIPەکان تەنها</b>\n\n‏پەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("💎 <b>بڵاوکردنەوە بۆ VIPەکان تەنها</b>\n\nپەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "📨 بڵاوکردنەوە بۆ نا-VIP":
             await db_put(f"users/{uid}/state", "bc_nonvip")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏📨 <b>بڵاوکردنەوە بۆ نا-VIPەکان</b>\n\n‏پەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("📨 <b>بڵاوکردنەوە بۆ نا-VIPەکان</b>\n\nپەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "📬 پەیام بۆ بەکارهێنەرێک":
             await db_put(f"users/{uid}/state", "msg_one_id")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "📌 دانانی پەیامی سیستەم":
             await db_put(f"users/{uid}/state", "set_sys_msg")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             await update.message.reply_text(
-                "‏📌 <b>دانانی پەیامی سیستەم</b>\n\n"
-                "‏ئەم پەیامە بە هەموو بەکارهێنەرانەوە نیشاندەدرێت کاتێک دەستی پێدەکەن.\n"
-                "‏پەیامەکەت بنووسە (HTML پشتگیری دەکات):",
+                "📌 <b>دانانی پەیامی سیستەم</b>\n\n"
+                "ئەم پەیامە بە هەموو بەکارهێنەرانەوە نیشاندەدرێت کاتێک دەستی پێدەکەن.\n"
+                "پەیامەکەت بنووسە (HTML پشتگیری دەکات):",
                 parse_mode="HTML", reply_markup=kb,
             )
             return
         if txt == "🗑 سڕینەوەی پەیامی سیستەم":
             await db_del("system/notice")
-            await update.message.reply_text("‏✅ پەیامی سیستەم سڕایەوە.", reply_markup=KB_MSG)
+            await update.message.reply_text("✅ پەیامی سیستەم سڕایەوە.", reply_markup=KB_MSG)
             return
         if txt == "📋 پەیامی سیستەمی ئێستا":
             msg_now = await db_get("system/notice")
             if msg_now:
-                await update.message.reply_text(f"‏📌 <b>پەیامی سیستەمی ئێستا:</b>\n\n{msg_now}", parse_mode="HTML", reply_markup=KB_MSG)
+                await update.message.reply_text(f"📌 <b>پەیامی سیستەمی ئێستا:</b>\n\n{msg_now}", parse_mode="HTML", reply_markup=KB_MSG)
             else:
-                await update.message.reply_text("‏📭 هیچ پەیامی سیستەمێک دانەنراوە.", reply_markup=KB_MSG)
+                await update.message.reply_text("📭 هیچ پەیامی سیستەمێک دانەنراوە.", reply_markup=KB_MSG)
             return
         if txt == "📜 مێژووی بڵاوکردنەوە":
             await owner_broadcast_history(update)
@@ -558,7 +591,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ════ بەشی VIP ════════════════════════════════════════════════════
         if txt == "💎 بەشی VIP":
-            await update.message.reply_text("‏💎 <b>بەشی VIP</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_VIP)
+            await update.message.reply_text("💎 <b>بەشی VIP</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_VIP)
             return
         if txt == "💎 لیستی VIPەکان":
             await owner_list_vips(update)
@@ -566,12 +599,12 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "➕ زیادکردنی VIP":
             await db_put(f"users/{uid}/state", "add_vip")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "➖ لابردنی VIP":
             await db_put(f"users/{uid}/state", "del_vip")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی VIP بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی VIP بنووسە:", reply_markup=kb)
             return
         if txt == "📊 ئامارەکانی VIP":
             await owner_vip_stats(update)
@@ -579,17 +612,17 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "💎 VIP بۆ کاتی دیاریکراو":
             await db_put(f"users/{uid}/state", "add_vip_date")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە، ئینجا بەرواری بەسەرچوون:\n‏نموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەر بنووسە، ئینجا بەرواری بەسەرچوون:\nنموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "💎 VIP بۆ هەمیشەیی":
             await db_put(f"users/{uid}/state", "add_vip_life")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە (VIP بۆ هەمیشە دەبێت):", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەر بنووسە (VIP بۆ هەمیشە دەبێت):", reply_markup=kb)
             return
         if txt == "🔍 پشکنینی VIP بەکارهێنەر":
             await db_put(f"users/{uid}/state", "check_vip")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
             return
         if txt == "🗑 سڕینەوەی هەموو VIP":
             await db_put(f"users/{uid}/state", "confirm_del_all_vip")
@@ -597,41 +630,41 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 [KeyboardButton("✅ بەڵێ، هەموو VIP بسڕەوە")],
                 [KeyboardButton("❌ هەڵوەشاندنەوە")],
             ], resize_keyboard=True)
-            await update.message.reply_text("‏⚠️ <b>دڵنیایت؟</b> هەموو VIPەکان دەسڕیتەوە!", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("⚠️ <b>دڵنیایت؟</b> هەموو VIPەکان دەسڕیتەوە!", parse_mode="HTML", reply_markup=kb)
             return
 
         # ════ بەشی ئەمنیەت ════════════════════════════════════════════════
-        if txt == "🛡 بەشی ئەمنیەت" and uid == OWNER_ID:
-            await update.message.reply_text("‏🛡 <b>بەشی ئەمنیەت</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_SEC)
+        if txt == "🛡 بەشی ئەمنیەت":
+            await update.message.reply_text("🛡 <b>بەشی ئەمنیەت</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_SEC)
             return
         if txt == "🚫 بلۆک کردنی بەکارهێنەر":
             await db_put(f"users/{uid}/state", "block_user")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "✅ لابردنی بلۆک":
             await db_put(f"users/{uid}/state", "unblock_user")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەرەکە بنووسە:", reply_markup=kb)
             return
         if txt == "📋 لیستی بلۆکەکان":
             await owner_list_blocked(update)
             return
         if txt == "🗑 سڕینەوەی هەموو بلۆک":
             await db_del("blocked")
-            await update.message.reply_text("‏✅ هەموو بلۆکەکان لابران.", reply_markup=KB_SEC)
+            await update.message.reply_text("✅ هەموو بلۆکەکان سڕایەوە.", reply_markup=KB_SEC)
             return
         if txt == "⚠️ ئاگادارکردنەوەی بەکارهێنەر":
             await db_put(f"users/{uid}/state", "warn_user_id")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
             return
         if txt == "🔒 قەدەغەکردنی فیچەر":
             await db_put(f"users/{uid}/state", "restrict_feat")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             await update.message.reply_text(
-                "‏🔒 ناوی فیچەر بنووسە کە دەتەوێت قەدەغە بکەیت:\n"
-                "‏نموونە: <code>create_bot</code> یان <code>broadcast</code>",
+                "🔒 ناوی فیچەر بنووسە کە دەتەوێت قەدەغە بکەیت:\n"
+                "نموونە: <code>create_bot</code> یان <code>broadcast</code>",
                 parse_mode="HTML", reply_markup=kb,
             )
             return
@@ -644,50 +677,101 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ════ بەشی کانال ══════════════════════════════════════════════════
         if txt == "📢 بەشی کانال":
-            await update.message.reply_text("‏📢 <b>بەشی کانال</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_CHAN)
+            await update.message.reply_text("📢 <b>بەشی کانال</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_CHAN)
             return
         if txt == "📢 گۆڕینی کانالی سەرەکی":
             await db_put(f"users/{uid}/state", "change_main_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏📢 یوزەرنەیمی کانالی نوێ بنووسە (بەبێ @):", reply_markup=kb)
+            await update.message.reply_text("📢 یوزەرنەیمی کانالی نوێ بنووسە (بەبێ @):", reply_markup=kb)
             return
         if txt == "➕ زیادکردنی کانالی داواکراو":
             await db_put(f"users/{uid}/state", "add_req_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             await update.message.reply_text(
-                "‏➕ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):\n"
-                "‏ئەم کانالە دەبێت بە بەکارهێنەران داواکرێت بۆ ئەندامبوون",
+                "➕ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):\n"
+                "ئەم کانالە دەبێت بە بەکارهێنەران داواکرێت بۆ ئەندامبوون",
                 reply_markup=kb,
             )
             return
         if txt == "➖ لابردنی کانالی داواکراو":
             await db_put(f"users/{uid}/state", "del_req_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏➖ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):", reply_markup=kb)
+            await update.message.reply_text("➖ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):", reply_markup=kb)
             return
         if txt == "📋 لیستی کانالەکان":
             await owner_list_channels(update)
             return
         if txt == "✅ چالاككردنی داواکردنی کانال":
             await db_put("system/force_join", True)
-            await update.message.reply_text("‏✅ داواکردنی ئەندامبوون چالاک کرا.", reply_markup=KB_CHAN)
+            await update.message.reply_text("✅ داواکردنی ئەندامبوون چالاک کرا.", reply_markup=KB_CHAN)
             return
         if txt == "❌ لەکارخستنی داواکردن":
             await db_put("system/force_join", False)
-            await update.message.reply_text("‏❌ داواکردنی ئەندامبوون لەکارخرا.", reply_markup=KB_CHAN)
+            await update.message.reply_text("❌ داواکردنی ئەندامبوون لەکارخرا.", reply_markup=KB_CHAN)
             return
         if txt == "🔍 پشکنینی ئەندامی کانال":
             await db_put(f"users/{uid}/state", "check_member")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🆔 ID ی بەکارهێنەر بنووسە:", reply_markup=kb)
             return
         if txt == "📊 ئامارەکانی کانال":
             await owner_channel_stats(update)
             return
 
+        # ════ بەشی ئەدمینەکان ═════════════════════════════════════════════
+        if txt == "👨‍💼 بەشی ئەدمینەکان":
+            await update.message.reply_text("👨‍💼 <b>بەشی ئەدمینەکان</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_ADMINS)
+            return
+        if txt == "👨‍💼 لیستی ئەدمینەکان":
+            await owner_list_admins(update)
+            return
+        if txt == "➕ زیادکردنی ئەدمین":
+            await db_put(f"users/{uid}/state", "add_admin")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            await update.message.reply_text(
+                "👨‍💼 <b>زیادکردنی ئەدمینی نوێ</b>\n\n"
+                "🆔 ID ی بەکارهێنەرەکە بنووسە کە دەتەوێت ئەدمینی بکەیت:",
+                parse_mode="HTML", reply_markup=kb,
+            )
+            return
+        if txt == "➖ لابردنی ئەدمین":
+            await db_put(f"users/{uid}/state", "del_admin")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            await update.message.reply_text("🆔 ID ی ئەدمینەکە بنووسە تا لابیبریت:", reply_markup=kb)
+            return
+        if txt == "📊 ئامارەکانی ئەدمینەکان":
+            await owner_admin_stats(update)
+            return
+
+        # ════ بەشی ئاگادارکردنەوە ═════════════════════════════════════════
+        if txt == "🔔 بەشی ئاگادارکردنەوە":
+            await update.message.reply_text("🔔 <b>بەشی ئاگادارکردنەوە</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_NOTIF)
+            return
+        if txt == "🔔 ئاگادارکردنەوەی گشتی":
+            await db_put(f"users/{uid}/state", "notif_all")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            await update.message.reply_text("🔔 <b>ئاگادارکردنەوەی گشتی</b>\n\nنامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            return
+        if txt == "📌 ئاگادارکردنەوەی VIP":
+            await db_put(f"users/{uid}/state", "notif_vip")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            await update.message.reply_text("💎 <b>ئاگادارکردنەوەی تایبەت بۆ VIPەکان</b>\n\nنامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            return
+        if txt == "📋 مێژووی ئاگادارکردنەوە":
+            await owner_notif_history(update)
+            return
+        if txt == "🔔 چالاككردنی ئاگادارکردنەوە":
+            await db_put("system/notifications_enabled", True)
+            await update.message.reply_text("✅ ئاگادارکردنەوەکان چالاک کرا.", reply_markup=KB_NOTIF)
+            return
+        if txt == "🔕 لەکارخستنی ئاگادارکردنەوە":
+            await db_put("system/notifications_enabled", False)
+            await update.message.reply_text("🔕 ئاگادارکردنەوەکان لەکارخرا.", reply_markup=KB_NOTIF)
+            return
+
         # ════ بەشی سیستەم ═════════════════════════════════════════════════
-        if txt == "⚙️ بەشی سیستەم" and uid == OWNER_ID:
-            await update.message.reply_text("‏⚙️ <b>بەشی سیستەم</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_SYS)
+        if txt == "⚙️ بەشی سیستەم":
+            await update.message.reply_text("⚙️ <b>بەشی سیستەم</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_SYS)
             return
         if txt == "⚙️ زانیاری سیستەم":
             await owner_sys_info(update)
@@ -695,73 +779,49 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "🔄 نوێکردنەوەی هەموو وەبهووک":
             await owner_refresh_all_webhooks(update)
             return
-        if txt == "🗑 پاككردنی داتابەیس" and uid == OWNER_ID:
+        if txt == "🗑 پاككردنی داتابەیس":
             await db_put(f"users/{uid}/state", "confirm_clear_db")
             kb = ReplyKeyboardMarkup([
                 [KeyboardButton("✅ بەڵێ، پاک بکەرەوە")],
                 [KeyboardButton("❌ هەڵوەشاندنەوە")],
             ], resize_keyboard=True)
-            await update.message.reply_text("‏⚠️ <b>دڵنیایت؟</b> هەموو داتاکان دەسڕیتەوە!", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text("⚠️ <b>دڵنیایت؟</b> هەموو داتاکان دەسڕیتەوە!", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "💾 پشتگیری داتابەیس":
             await owner_backup_db(update)
             return
-        if txt == "📝 گۆڕینی بۆتی سەرەکی" and uid == OWNER_ID:
+        if txt == "📝 گۆڕینی بۆتی سەرەکی":
             await db_put(f"users/{uid}/state", "change_master_token")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🔑 تۆکێنی نوێی بۆتی سەرەکی بنووسە:", reply_markup=kb)
+            await update.message.reply_text("🔑 تۆکێنی نوێی بۆتی سەرەکی بنووسە:", reply_markup=kb)
             return
-        if txt == "🌐 گۆڕینی PROJECT URL" and uid == OWNER_ID:
+        if txt == "🌐 گۆڕینی PROJECT URL":
             await db_put(f"users/{uid}/state", "change_project_url")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             cur = await db_get("system/project_url") or PROJECT_URL or "نییە"
-            await update.message.reply_text(f"‏🌐 URL ی ئێستا: <code>{cur}</code>\n\n‏URL ی نوێ بنووسە:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text(f"🌐 URL ی ئێستا: <code>{cur}</code>\n\nURL ی نوێ بنووسە:", parse_mode="HTML", reply_markup=kb)
             return
         if txt == "📋 لۆگەکان":
             await owner_show_logs(update)
             return
-        if txt == "🔃 ڕیستارتی سیستەم" and uid == OWNER_ID:
+        if txt == "🔃 ڕیستارتی سیستەم":
             await db_put(f"users/{uid}/state", "confirm_restart")
             kb = ReplyKeyboardMarkup([
                 [KeyboardButton("✅ بەڵێ، ڕیستارت بکە")],
                 [KeyboardButton("❌ هەڵوەشاندنەوە")],
             ], resize_keyboard=True)
-            await update.message.reply_text("‏⚠️ دڵنیایت لە ڕیستارتکردنی سیستەم؟", reply_markup=kb)
+            await update.message.reply_text("⚠️ دڵنیایت لە ڕیستارتکردنی سیستەم؟", reply_markup=kb)
             return
-        if txt == "📢 گۆڕینی کانالی بەڕێوەبەر" and uid == OWNER_ID:
+        if txt == "📢 گۆڕینی کانالی بەڕێوەبەر":
             await db_put(f"users/{uid}/state", "change_dev_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏📢 یوزەرنەیمی کانالی بەڕێوەبەری نوێ بنووسە (بەبێ @):", reply_markup=kb)
+            await update.message.reply_text("📢 یوزەرنەیمی کانالی بەڕێوەبەری نوێ بنووسە (بەبێ @):", reply_markup=kb)
             return
-        if txt == "🖼 گۆڕینی وێنەی بەخێرهاتن" and uid == OWNER_ID:
-            await db_put(f"users/{uid}/state", "change_welcome_photo")
+        if txt == "🖼 گۆڕینی وێنەی بەخێرهاتن":
+            await db_put(f"users/{uid}/state", "change_photo_url")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("‏🖼 وێنەکەت بنێرە (وێنەی Telegram):", reply_markup=kb)
+            await update.message.reply_text("🖼 لینکی وێنەی نوێ بنووسە:", reply_markup=kb)
             return
-
-        # ════ بەشی ئەدمینەکان (تەنها Owner) ════════════════════════════════
-        if uid == OWNER_ID:
-            if txt == "👮 بەشی ئەدمینەکان":
-                await update.message.reply_text("‏👮 <b>بەشی ئەدمینەکان</b>\n\n‏هەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_ADMINS)
-                return
-            if txt == "👮 لیستی ئەدمینەکان":
-                await owner_list_admins(update)
-                return
-            if txt == "➕ زیادکردنی ئەدمین":
-                await db_put(f"users/{uid}/state", "add_admin")
-                kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-                await update.message.reply_text("‏🆔 ID ی بەکارهێنەر بنووسە بۆ ئەدمینکردن:", reply_markup=kb)
-                return
-            if txt == "➖ لابردنی ئەدمین":
-                await db_put(f"users/{uid}/state", "del_admin")
-                kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-                await update.message.reply_text("‏🆔 ID ی ئەدمین بنووسە بۆ لابردن:", reply_markup=kb)
-                return
-            if txt == "📋 زانیاری ئەدمین بە ID":
-                await db_put(f"users/{uid}/state", "admin_info_id")
-                kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-                await update.message.reply_text("‏🆔 ID ی ئەدمین بنووسە:", reply_markup=kb)
-                return
 
     # ════════════════════════════════════════════════════════════════════════
     # دۆخەکانی چاوەڕوانی
@@ -777,20 +837,22 @@ async def show_owner_main(update: Update):
     all_u  = await db_get("users")         or {}
     all_v  = await db_get("vip")           or {}
     all_bl = await db_get("blocked")       or {}
-    admins = await db_get("system/admins") or {}
-    fj     = await db_get("system/force_join") or False
+    admins = await db_get("admins")        or {}
     run    = sum(1 for v in all_b.values() if v.get("status") == "running")
+    notif_on = await db_get("system/notifications_enabled")
+    fj       = await db_get("system/force_join") or False
     msg = (
-        "‏👑 <b>پانێلی سەرەکی</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"‏👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
-        f"‏🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
-        f"‏💎 VIPەکان:        <b>{len(all_v)}</b>\n"
-        f"‏🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
-        f"‏👮 ئەدمینەکان:     <b>{len(admins)}</b>\n"
-        f"‏📢 فۆرس جۆین:      <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━━━━\n"
-        "‏📌 بەشێک هەڵبژێرە:"
+        "‼️ <b>پانێلی سەرەکی</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
+        f"🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
+        f"💎 VIPەکان:        <b>{len(all_v)}</b>\n"
+        f"🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
+        f"👨‍💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
+        f"🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
+        f"📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📌 بەشێک هەڵبژێرە:"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
 
@@ -803,7 +865,7 @@ async def show_bot_list(update: Update, uid: int):
     mine  = {k: v for k, v in all_b.items() if v.get("owner") == uid}
     if not mine:
         await update.message.reply_text(
-            "‏📭 <b>هیچ بۆتێکت دروست نەکردووە!</b>\n\n‏کلیک لە '➕ دروستکردنی بۆتی نوێ' بکە.",
+            "📭 <b>هیچ بۆتێکت دروست نەکردووە!</b>\n\nکلیک لە '➕ دروستکردنی بۆتی نوێ' بکە.",
             parse_mode="HTML", reply_markup=kb_main(uid),
         )
         return
@@ -813,7 +875,7 @@ async def show_bot_list(update: Update, uid: int):
         rows.append([KeyboardButton(f"{st} @{info.get('bot_username','Bot')}")])
     rows.append([KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")])
     await update.message.reply_text(
-        f"‏📂 <b>بۆتەکانت ({len(mine)}):</b>\n‏🟢 کاردەکات  |  🔴 ڕاگیراوە",
+        f"📂 <b>بۆتەکانت ({len(mine)}):</b>\n🟢 کاردەکات  |  🔴 ڕاگیراوە",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(rows, resize_keyboard=True),
     )
@@ -825,14 +887,14 @@ async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
     un   = info.get("bot_username","ناسناو")
     bu   = await db_get(f"bot_users/{bid}") or {}
     msg  = (
-        "‏⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏🤖 ناو: {name}\n"
-        f"‏🔗 یوزەر: @{un}\n"
-        f"‏📊 دۆخ: {st}\n"
-        f"‏👥 بەکارهێنەران: <b>{len(bu)}</b>\n"
-        f"‏🆔 ID: <code>{bid}</code>\n"
-        "‏━━━━━━━━━━━━━━━━━━━"
+        "⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 ناو: {name}\n"
+        f"🔗 یوزەر: @{un}\n"
+        f"📊 دۆخ: {st}\n"
+        f"👥 بەکارهێنەران: <b>{len(bu)}</b>\n"
+        f"🆔 ID: <code>{bid}</code>\n"
+        "━━━━━━━━━━━━━━━━━━━"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb_control(uid))
 
@@ -845,27 +907,31 @@ async def show_stats(update: Update, uid: int):
     if uid == OWNER_ID:
         run_a = sum(1 for v in all_b.values() if v.get("status") == "running")
         all_v = await db_get("vip") or {}
+        admins = await db_get("admins") or {}
         txt   = (
-            "‏📊 <b>ئامارەکانی سیستەم</b>\n"
-            "‏━━━━━━━━━━━━━━━━━━━\n"
-            f"‏👥 هەموو بەکارهێنەران: <b>{len(all_u)}</b>\n"
-            f"‏🤖 هەموو بۆتەکان:      <b>{len(all_b)}</b>\n"
-            f"‏🟢 چالاک: <b>{run_a}</b>  🔴 ڕاگیراو: <b>{len(all_b)-run_a}</b>\n"
-            f"‏💎 VIPەکان: <b>{len(all_v)}</b>\n"
-            "‏━━━━━━━━━━━━━━━━━━━\n"
-            f"‏📁 بۆتەکانی خۆت: <b>{len(mine)}</b>  (🟢{run_m})"
+            "📊 <b>ئامارەکانی سیستەم</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"👥 هەموو بەکارهێنەران: <b>{len(all_u)}</b>\n"
+            f"🤖 هەموو بۆتەکان:      <b>{len(all_b)}</b>\n"
+            f"🟢 چالاک: <b>{run_a}</b>  🔴 ڕاگیراو: <b>{len(all_b)-run_a}</b>\n"
+            f"💎 VIPەکان: <b>{len(all_v)}</b>\n"
+            f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"📁 بۆتەکانی خۆت: <b>{len(mine)}</b>  (🟢{run_m})"
         )
     else:
         bu_count = 0
         for k, v in mine.items():
             bu = await db_get(f"bot_users/{k}") or {}
             bu_count += len(bu)
+        vip_badge = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
         txt = (
-            "‏📊 <b>ئامارەکانت</b>\n"
-            "‏━━━━━━━━━━━━━━━━━━━\n"
-            f"‏🤖 بۆتی دروستکردوو: <b>{len(mine)}</b>\n"
-            f"‏🟢 چالاک: <b>{run_m}</b>  🔴 ڕاگیراو: <b>{len(mine)-run_m}</b>\n"
-            f"‏👥 کۆی بەکارهێنەرانی بۆتەکانت: <b>{bu_count}</b>"
+            "📊 <b>ئامارەکانت</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n"
+            f"🎖 دۆخ: <b>{vip_badge}</b>\n"
+            f"🤖 بۆتی دروستکردوو: <b>{len(mine)}</b>\n"
+            f"🟢 چالاک: <b>{run_m}</b>  🔴 ڕاگیراو: <b>{len(mine)-run_m}</b>\n"
+            f"👥 کۆی بەکارهێنەرانی بۆتەکانت: <b>{bu_count}</b>"
         )
     await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
 
@@ -876,12 +942,12 @@ async def show_stats(update: Update, uid: int):
 async def handle_control(update: Update, uid: int, txt: str):
     bid = await db_get(f"users/{uid}/selected_bot")
     if not bid:
-        await update.message.reply_text("‏⚠️ تکایە سەرەتا بۆتێک هەڵبژێرە.", reply_markup=kb_main(uid))
+        await update.message.reply_text("⚠️ تکایە سەرەتا بۆتێک هەڵبژێرە.", reply_markup=kb_main(uid))
         return
     info = await db_get(f"managed_bots/{bid}")
     if not info:
         await db_del(f"users/{uid}/selected_bot")
-        await update.message.reply_text("‏❌ بۆتەکە سڕاوەتەوە.", reply_markup=kb_main(uid))
+        await update.message.reply_text("❌ بۆتەکە سڕاوەتەوە.", reply_markup=kb_main(uid))
         return
     un    = info.get("bot_username","Bot")
     token = info.get("token","")
@@ -889,17 +955,17 @@ async def handle_control(update: Update, uid: int, txt: str):
     if txt == "▶️ دەستپێکردن":
         info["status"] = "running"
         await db_put(f"managed_bots/{bid}", info)
-        await update.message.reply_text(f"‏✅ بۆتی @{un} دەستی پێکرد 🟢", reply_markup=kb_control(uid))
+        await update.message.reply_text(f"✅ بۆتی @{un} دەستی پێکرد 🟢", reply_markup=kb_control(uid))
 
     elif txt == "⏸ وەستاندن":
         info["status"] = "stopped"
         await db_put(f"managed_bots/{bid}", info)
-        await update.message.reply_text(f"‏🛑 بۆتی @{un} وەستاندرا 🔴", reply_markup=kb_control(uid))
+        await update.message.reply_text(f"🛑 بۆتی @{un} وەستاندرا 🔴", reply_markup=kb_control(uid))
 
     elif txt == "🔄 نوێکردنەوە":
         info["status"] = "running"
         await db_put(f"managed_bots/{bid}", info)
-        await update.message.reply_text(f"‏🔄 بۆتی @{un} نوێکرایەوە ✅", reply_markup=kb_control(uid))
+        await update.message.reply_text(f"🔄 بۆتی @{un} نوێکرایەوە ✅", reply_markup=kb_control(uid))
 
     elif txt == "📋 زانیاری بۆت":
         await show_bot_control(update, uid, bid, info)
@@ -909,22 +975,22 @@ async def handle_control(update: Update, uid: int, txt: str):
         cur = info.get("welcome_msg","")
         kb  = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
         await update.message.reply_text(
-            "‏✏️ <b>گۆڕینی نامەی بەخێرهاتن</b>\n\n"
-            f"‏📝 نامەی ئێستا:\n<code>{html.escape(cur) if cur else '(بەتاڵ)'}</code>\n\n"
-            "‏نامەی نوێت بنووسە:\n‏💡 <code>{name}</code> بەکاربهێنە بۆ ناوی بەکارهێنەر",
+            "✏️ <b>گۆڕینی نامەی بەخێرهاتن</b>\n\n"
+            f"📝 نامەی ئێستا:\n<code>{html.escape(cur) if cur else '(بەتاڵ)'}</code>\n\n"
+            "نامەی نوێت بنووسە:\n💡 <code>{name}</code> بەکاربهێنە بۆ ناوی بەکارهێنەر",
             parse_mode="HTML", reply_markup=kb,
         )
 
     elif txt == "📨 پەیام بۆ بەکارهێنەران":
         bu = await db_get(f"bot_users/{bid}") or {}
         if not bu:
-            await update.message.reply_text("‏📭 هیچ بەکارهێنەرێک بۆتەکەت بەکار نەهێناوە.", reply_markup=kb_control(uid))
+            await update.message.reply_text("📭 هیچ بەکارهێنەرێک بۆتەکەت بەکار نەهێناوە.", reply_markup=kb_control(uid))
             return
         await db_put(f"users/{uid}/state", f"bot_bc:{bid}")
         kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
         await update.message.reply_text(
-            f"‏📨 <b>بڵاوکردنەوە بۆ بەکارهێنەرانی @{un}</b>\n\n"
-            f"‏👥 ژمارە: <b>{len(bu)}</b>\n\n‏پەیامەکەت بنووسە:",
+            f"📨 <b>بڵاوکردنەوە بۆ بەکارهێنەرانی @{un}</b>\n\n"
+            f"👥 ژمارە: <b>{len(bu)}</b>\n\nپەیامەکەت بنووسە:",
             parse_mode="HTML", reply_markup=kb,
         )
 
@@ -932,15 +998,15 @@ async def handle_control(update: Update, uid: int, txt: str):
         if token:
             safe = (PROJECT_URL or "").rstrip('/')
             r    = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post"]})
-            resp = "‏✅ وەبهووک نوێکرایەوە!" if r.get("ok") else f"‏❌ هەڵە: {r.get('description','')}"
+            resp = "✅ وەبهووک نوێکرایەوە!" if r.get("ok") else f"❌ هەڵە: {r.get('description','')}"
             await update.message.reply_text(resp, reply_markup=kb_control(uid))
         else:
-            await update.message.reply_text("‏❌ تۆکێن نەدۆزرایەوە.", reply_markup=kb_control(uid))
+            await update.message.reply_text("❌ تۆکێن نەدۆزرایەوە.", reply_markup=kb_control(uid))
 
     elif txt == "🔑 گۆڕینی تۆکێن" and uid == OWNER_ID:
         await db_put(f"users/{uid}/state", f"change_token:{bid}")
         kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-        await update.message.reply_text("‏🔑 تۆکێنی نوێ بنووسە:", reply_markup=kb)
+        await update.message.reply_text("🔑 تۆکێنی نوێ بنووسە:", reply_markup=kb)
 
     elif txt == "🗑 سڕینەوەی بۆت":
         await db_put(f"users/{uid}/state", f"confirm_del:{bid}")
@@ -949,7 +1015,7 @@ async def handle_control(update: Update, uid: int, txt: str):
             [KeyboardButton("❌ نەخێر، دەرچوون")],
         ], resize_keyboard=True)
         await update.message.reply_text(
-            f"‏⚠️ <b>دڵنیایت؟</b>\n\n‏بۆتی @{un} بە تەواوی دەسڕیتەوە!",
+            f"⚠️ <b>دڵنیایت؟</b>\n\nبۆتی @{un} بە تەواوی دەسڕیتەوە!",
             parse_mode="HTML", reply_markup=kb,
         )
 
@@ -961,7 +1027,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
 
     if txt == "❌ هەڵوەشاندنەوە":
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text("‏↩️ هەڵوەشاندرایەوە.", reply_markup=kb_main(uid))
+        await update.message.reply_text("↩️ هەڵوەشاندرایەوە.", reply_markup=kb_main(uid))
         return
 
     # ── چاوەڕوانی تۆکێن ───────────────────────────────────────────────────
@@ -969,18 +1035,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", txt):
             await activate_token(update, uid, txt)
         else:
-            await update.message.reply_text("‏⚠️ تۆکێنەکە دروست نییە.\n‏نموونە: <code>123456789:ABCxyz...</code>", parse_mode="HTML")
-        return
-
-    # ── گۆڕینی وێنەی بەخێرهاتن (وێنەی واقعی) ────────────────────────────
-    if state == "change_welcome_photo" and uid == OWNER_ID:
-        if update.message.photo:
-            photo_id = update.message.photo[-1].file_id
-            await db_put("system/photo_file_id", photo_id)
-            await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏✅ وێنەی بەخێرهاتن نوێکرا!", reply_markup=KB_SYS)
-        else:
-            await update.message.reply_text("‏⚠️ تکایە وێنەیەک بنێرە (فایلی وێنە).")
+            await update.message.reply_text("⚠️ تۆکێنەکە دروست نییە.\nنموونە: <code>123456789:ABCxyz...</code>", parse_mode="HTML")
         return
 
     # ── دڵنیاکردنەوەی سڕینەوەی بۆت ──────────────────────────────────────
@@ -990,7 +1045,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             await do_delete_bot(update, uid, bid)
         else:
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏↩️ گەڕایتەوە.", reply_markup=kb_control(uid))
+            await update.message.reply_text("↩️ گەڕایتەوە.", reply_markup=kb_control(uid))
         return
 
     # ── گۆڕینی بەخێرهاتن ──────────────────────────────────────────────────
@@ -999,12 +1054,12 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         info = await db_get(f"managed_bots/{bid}")
         if not info:
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏❌ بۆتەکە نەدۆزرایەوە.", reply_markup=kb_main(uid))
+            await update.message.reply_text("❌ بۆتەکە نەدۆزرایەوە.", reply_markup=kb_main(uid))
             return
         info["welcome_msg"] = txt
         await db_put(f"managed_bots/{bid}", info)
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text("‏✅ <b>نامەی بەخێرهاتن نوێکرا!</b>", parse_mode="HTML", reply_markup=kb_control(uid))
+        await update.message.reply_text("✅ <b>نامەی بەخێرهاتن نوێکرا!</b>", parse_mode="HTML", reply_markup=kb_control(uid))
         return
 
     # ── بڵاوکردنەوەی بۆت ─────────────────────────────────────────────────
@@ -1013,7 +1068,10 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         info  = await db_get(f"managed_bots/{bid}") or {}
         token = info.get("token","")
         bu    = await db_get(f"bot_users/{bid}") or {}
-        sm    = await update.message.reply_text(f"‏⏳ ناردن بۆ {len(bu)} بەکارهێنەر...")
+        # خێراکردن بەپێی VIP
+        vip_user = await is_vip(uid)
+        delay = 0.02 if vip_user else 0.05
+        sm    = await update.message.reply_text(f"⏳ ناردن بۆ {len(bu)} بەکارهێنەر...")
         sent=fail=0
         for cid in bu.keys():
             try:
@@ -1021,9 +1079,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                 if r.get("ok"): sent+=1
                 else: fail+=1
             except: fail+=1
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(delay)
         await db_del(f"users/{uid}/state")
-        await sm.edit_text(f"‏✅ <b>تەواو!</b> 📤{sent}  ❌{fail}", parse_mode="HTML")
+        await sm.edit_text(f"✅ <b>تەواو!</b> 📤{sent}  ❌{fail}", parse_mode="HTML")
         await update.message.reply_text(".", reply_markup=kb_control(uid))
         return
 
@@ -1033,7 +1091,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", txt):
             res = await send_tg(txt,"getMe",{})
             if not res.get("ok"):
-                await update.message.reply_text("‏❌ تۆکێنەکە هەڵەیە.", reply_markup=kb_control(uid))
+                await update.message.reply_text("❌ تۆکێنەکە هەڵەیە.", reply_markup=kb_control(uid))
                 await db_del(f"users/{uid}/state")
                 return
             info = await db_get(f"managed_bots/{bid}") or {}
@@ -1044,54 +1102,56 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             safe = (PROJECT_URL or "").rstrip('/')
             await send_tg(txt,"setWebhook",{"url":f"{safe}/api/bot/{txt}","allowed_updates":["message","channel_post"]})
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏✅ تۆکێن گۆڕدرا!", reply_markup=kb_control(uid))
+            await update.message.reply_text("✅ تۆکێن گۆڕدرا!", reply_markup=kb_control(uid))
         else:
-            await update.message.reply_text("‏⚠️ تۆکێنەکە دروست نییە.")
+            await update.message.reply_text("⚠️ تۆکێنەکە دروست نییە.")
         return
 
     # ══════════════════════════════════════════════════════════════════════
-    # دۆخەکانی Owner / Admin
+    # دۆخەکانی Owner
     # ══════════════════════════════════════════════════════════════════════
-    if not (uid == OWNER_ID or await is_admin(uid)):
+    if uid != OWNER_ID and not await is_admin(uid):
         if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", txt):
-            await update.message.reply_text("‏⚠️ تکایە لەسەرەتاوە '➕ دروستکردنی بۆتی نوێ' بکلیک بکە.", reply_markup=kb_main(uid))
+            await update.message.reply_text("⚠️ تکایە لەسەرەتاوە '➕ دروستکردنی بۆتی نوێ' بکلیک بکە.", reply_markup=kb_main(uid))
         else:
-            await update.message.reply_text("‏تکایە لە کیبۆردی خوارەوە هەڵبژێرە 👇", reply_markup=kb_main(uid))
+            await update.message.reply_text("تکایە لە کیبۆردی خوارەوە هەڵبژێرە 👇", reply_markup=kb_main(uid))
         return
 
     # ── بڵاوکردنەوەی گشتی ────────────────────────────────────────────────
-    if state in ("bc_all","bc_vip","bc_nonvip"):
+    if state in ("bc_all","bc_vip","bc_nonvip","notif_all","notif_vip"):
         all_u   = await db_get("users") or {}
         all_v   = await db_get("vip")   or {}
         vip_ids = set(all_v.keys())
-        if state == "bc_all":    targets = list(all_u.keys())
-        elif state == "bc_vip":  targets = [i for i in all_u if i in vip_ids]
-        else:                    targets = [i for i in all_u if i not in vip_ids]
+        is_notif = state.startswith("notif_")
+        notif_type = state.replace("notif_","bc_") if is_notif else state
 
-        # خێرایی بەپێی VIP / ئاسایی
-        async def send_one(u_id):
-            try:
-                r = await send_tg(MASTER_TOKEN,"sendMessage",{"chat_id":int(u_id),"text":txt,"parse_mode":"HTML"})
-                return r.get("ok")
-            except: return False
+        if notif_type == "bc_all" or state == "notif_all":
+            targets = list(all_u.keys())
+        elif notif_type == "bc_vip" or state == "notif_vip":
+            targets = [i for i in all_u if i in vip_ids]
+        else:
+            targets = [i for i in all_u if i not in vip_ids]
 
-        sm   = await update.message.reply_text(f"‏⏳ ناردن بۆ {len(targets)} بەکارهێنەر...")
+        prefix = "🔔 <b>ئاگادارکردنەوە:</b>\n\n" if is_notif else ""
+        sm   = await update.message.reply_text(f"⏳ ناردن بۆ {len(targets)} بەکارهێنەر...")
         sent=fail=0
         for u_id in targets:
-            ok = await send_one(u_id)
-            if ok: sent+=1
-            else: fail+=1
-            # VIPەکان زووتر
-            delay = 0.02 if u_id in vip_ids else 0.05
-            await asyncio.sleep(delay)
-
+            try:
+                r = await send_tg(MASTER_TOKEN,"sendMessage",{"chat_id":int(u_id),"text":prefix+txt,"parse_mode":"HTML"})
+                if r.get("ok"): sent+=1
+                else: fail+=1
+            except: fail+=1
+            await asyncio.sleep(0.05)
         await db_del(f"users/{uid}/state")
+        # ذخیره مێژوو
         hist = await db_get("system/bc_history") or []
         if isinstance(hist, dict): hist = []
+        hist_key = "system/notif_history" if is_notif else "system/bc_history"
         hist.insert(0, {"time": now_str(), "sent": sent, "fail": fail, "type": state})
-        await db_put("system/bc_history", hist[:20])
-        await sm.edit_text(f"‏✅ <b>تەواو!</b> 📤{sent}  ❌{fail}", parse_mode="HTML")
-        await update.message.reply_text(".", reply_markup=KB_MSG)
+        await db_put(hist_key, hist[:20])
+        await sm.edit_text(f"✅ <b>تەواو!</b> 📤{sent}  ❌{fail}", parse_mode="HTML")
+        reply_kb = KB_NOTIF if is_notif else KB_MSG
+        await update.message.reply_text(".", reply_markup=reply_kb)
         return
 
     # ── پەیام بۆ بەکارهێنەرێک ────────────────────────────────────────────
@@ -1100,9 +1160,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_put(f"users/{uid}/state", f"msg_one_text:{target}")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text(f"‏✅ ID: <code>{target}</code>\n\n‏ئێستا پەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text(f"✅ ID: <code>{target}</code>\n\nئێستا پەیامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state.startswith("msg_one_text:"):
@@ -1110,16 +1170,16 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         r = await send_tg(MASTER_TOKEN,"sendMessage",{"chat_id":target,"text":txt,"parse_mode":"HTML"})
         await db_del(f"users/{uid}/state")
         if r.get("ok"):
-            await update.message.reply_text(f"‏✅ پەیام بۆ <code>{target}</code> نێردرا!", parse_mode="HTML", reply_markup=KB_MSG)
+            await update.message.reply_text(f"✅ پەیام بۆ <code>{target}</code> نێردرا!", parse_mode="HTML", reply_markup=KB_MSG)
         else:
-            await update.message.reply_text(f"‏❌ هەڵە: {r.get('description','')}", reply_markup=KB_MSG)
+            await update.message.reply_text(f"❌ هەڵە: {r.get('description','')}", reply_markup=KB_MSG)
         return
 
     # ── پەیامی سیستەم ────────────────────────────────────────────────────
     if state == "set_sys_msg":
         await db_put("system/notice", txt)
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text("‏✅ پەیامی سیستەم دانرا.", reply_markup=KB_MSG)
+        await update.message.reply_text("✅ پەیامی سیستەم دانرا.", reply_markup=KB_MSG)
         return
 
     # ── VIP ───────────────────────────────────────────────────────────────
@@ -1128,9 +1188,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_put(f"vip/{target}", {"expires":"lifetime","added_by":uid,"date":now_str()})
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏💎 بەکارهێنەری <code>{target}</code> بوو بە VIP هەمیشەیی!", parse_mode="HTML", reply_markup=KB_VIP)
+            await update.message.reply_text(f"💎 بەکارهێنەری <code>{target}</code> بوو بە VIP هەمیشەیی!", parse_mode="HTML", reply_markup=KB_VIP)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "add_vip_life":
@@ -1138,9 +1198,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_put(f"vip/{target}", {"expires":"lifetime","added_by":uid,"date":now_str()})
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏💎 <code>{target}</code> بوو بە VIP هەمیشەیی!", parse_mode="HTML", reply_markup=KB_VIP)
+            await update.message.reply_text(f"💎 <code>{target}</code> بوو بە VIP هەمیشەیی!", parse_mode="HTML", reply_markup=KB_VIP)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "add_vip_date":
@@ -1151,11 +1211,11 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                 datetime.strptime(parts[1], "%Y-%m-%d")
                 await db_put(f"vip/{target}", {"expires":parts[1],"added_by":uid,"date":now_str()})
                 await db_del(f"users/{uid}/state")
-                await update.message.reply_text(f"‏💎 <code>{target}</code> بوو بە VIP تا <b>{parts[1]}</b>!", parse_mode="HTML", reply_markup=KB_VIP)
+                await update.message.reply_text(f"💎 <code>{target}</code> بوو بە VIP تا <b>{parts[1]}</b>!", parse_mode="HTML", reply_markup=KB_VIP)
             except:
-                await update.message.reply_text("‏⚠️ فۆرمات هەڵەیە. نموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML")
+                await update.message.reply_text("⚠️ فۆرمات هەڵەیە. نموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML")
         else:
-            await update.message.reply_text("‏⚠️ فۆرمات هەڵەیە. نموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML")
+            await update.message.reply_text("⚠️ فۆرمات هەڵەیە. نموونە: <code>123456789 2025-12-31</code>", parse_mode="HTML")
         return
 
     if state == "del_vip":
@@ -1163,33 +1223,33 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_del(f"vip/{target}")
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏✅ VIPی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_VIP)
+            await update.message.reply_text(f"✅ VIPی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_VIP)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "check_vip":
         try:
-            target = int(txt.strip())
-            vdata  = await db_get(f"vip/{target}")
+            target  = int(txt.strip())
+            vd      = await db_get(f"vip/{target}")
             await db_del(f"users/{uid}/state")
-            if vdata:
-                exp = vdata.get("expires","نییە")
-                await update.message.reply_text(f"‏💎 بەکارهێنەری <code>{target}</code> VIPە\n‏⏰ بەسەرچوون: <b>{exp}</b>", parse_mode="HTML", reply_markup=KB_VIP)
+            if vd:
+                exp = vd.get("expires","نییە")
+                await update.message.reply_text(f"💎 بەکارهێنەری <code>{target}</code> VIPە.\n⏰ بەسەرچوون: <b>{exp}</b>", parse_mode="HTML", reply_markup=KB_VIP)
             else:
-                await update.message.reply_text(f"‏❌ بەکارهێنەری <code>{target}</code> VIP نییە.", parse_mode="HTML", reply_markup=KB_VIP)
+                await update.message.reply_text(f"❌ بەکارهێنەری <code>{target}</code> VIP نییە.", parse_mode="HTML", reply_markup=KB_VIP)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "confirm_del_all_vip":
         if txt == "✅ بەڵێ، هەموو VIP بسڕەوە":
             await db_del("vip")
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏✅ هەموو VIPەکان سڕایەوە.", reply_markup=KB_VIP)
+            await update.message.reply_text("✅ هەموو VIPەکان سڕایەوە.", reply_markup=KB_VIP)
         else:
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏↩️ هەڵوەشاندرایەوە.", reply_markup=KB_VIP)
+            await update.message.reply_text("↩️ هەڵوەشاندرایەوە.", reply_markup=KB_VIP)
         return
 
     # ── ئەمنیەت ───────────────────────────────────────────────────────────
@@ -1198,9 +1258,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_put(f"blocked/{target}", True)
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏🚫 بەکارهێنەری <code>{target}</code> بلۆک کرا.", parse_mode="HTML", reply_markup=KB_SEC)
+            await update.message.reply_text(f"🚫 بەکارهێنەری <code>{target}</code> بلۆک کرا.", parse_mode="HTML", reply_markup=KB_SEC)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "unblock_user":
@@ -1208,9 +1268,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_del(f"blocked/{target}")
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏✅ بلۆکی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_SEC)
+            await update.message.reply_text(f"✅ بلۆکی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_SEC)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "warn_user_id":
@@ -1218,9 +1278,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_put(f"users/{uid}/state", f"warn_user_msg:{target}")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text(f"‏⚠️ نامەی ئاگادارکردنەوە بنووسە بۆ <code>{target}</code>:", parse_mode="HTML", reply_markup=kb)
+            await update.message.reply_text(f"⚠️ نامەی ئاگادارکردنەوە بنووسە بۆ <code>{target}</code>:", parse_mode="HTML", reply_markup=kb)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state.startswith("warn_user_msg:"):
@@ -1228,18 +1288,18 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         warns  = await db_get(f"warnings/{target}") or 0
         new_w  = warns + 1
         await db_put(f"warnings/{target}", new_w)
-        r = await send_tg(MASTER_TOKEN,"sendMessage",{"chat_id":target,"text":f"‏⚠️ <b>ئاگادارکردنەوە #{new_w}</b>\n\n{txt}","parse_mode":"HTML"})
+        r = await send_tg(MASTER_TOKEN,"sendMessage",{"chat_id":target,"text":f"⚠️ <b>ئاگادارکردنەوە #{new_w}</b>\n\n{txt}","parse_mode":"HTML"})
         await db_del(f"users/{uid}/state")
         if r.get("ok"):
-            await update.message.reply_text(f"‏✅ ئاگادارکردنەوە #{new_w} نێردرا.", reply_markup=KB_SEC)
+            await update.message.reply_text(f"✅ ئاگادارکردنەوە #{new_w} نێردرا.", reply_markup=KB_SEC)
         else:
-            await update.message.reply_text(f"‏❌ هەڵە لە ناردن: {r.get('description','')}", reply_markup=KB_SEC)
+            await update.message.reply_text(f"❌ هەڵە لە ناردن: {r.get('description','')}", reply_markup=KB_SEC)
         return
 
     if state == "restrict_feat":
         await db_put(f"system/restricted/{txt.strip()}", True)
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏🔒 فیچەری <code>{txt}</code> قەدەغەکرا.", parse_mode="HTML", reply_markup=KB_SEC)
+        await update.message.reply_text(f"🔒 فیچەری <code>{txt}</code> قەدەغەکرا.", parse_mode="HTML", reply_markup=KB_SEC)
         return
 
     if state == "del_user":
@@ -1247,9 +1307,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target = int(txt.strip())
             await db_del(f"users/{target}")
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text(f"‏🗑 بەکارهێنەری <code>{target}</code> سڕایەوە.", parse_mode="HTML", reply_markup=KB_USERS)
+            await update.message.reply_text(f"🗑 بەکارهێنەری <code>{target}</code> سڕایەوە.", parse_mode="HTML", reply_markup=KB_USERS)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "search_user":
@@ -1262,13 +1322,13 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                 results.append((u_id, ud))
         await db_del(f"users/{uid}/state")
         if not results:
-            await update.message.reply_text("‏❌ بەکارهێنەرێک نەدۆزرایەوە.", reply_markup=KB_USERS)
+            await update.message.reply_text("❌ بەکارهێنەرێک نەدۆزرایەوە.", reply_markup=KB_USERS)
             return
-        lines = [f"‏🔍 <b>ئەنجامی گەڕان ({len(results)}):</b>\n"]
+        lines = [f"🔍 <b>ئەنجامی گەڕان ({len(results)}):</b>\n"]
         for u_id, ud in results[:10]:
             n  = html.escape(ud.get("name","ناسناو"))
             un = f"@{ud['username']}" if ud.get("username") else "—"
-            lines.append(f"‏• <a href='tg://user?id={u_id}'>{n}</a> {un} <code>{u_id}</code>")
+            lines.append(f"• <a href='tg://user?id={u_id}'>{n}</a> {un} <code>{u_id}</code>")
         await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_USERS)
         return
 
@@ -1280,25 +1340,25 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             vd     = await db_get(f"vip/{target}")
             bl     = await db_get(f"blocked/{target}")
             warns  = await db_get(f"warnings/{target}") or 0
-            admin  = str(target) in (await db_get("system/admins") or {})
-            vip_txt= f"‏💎 VIP ({vd.get('expires','')})" if vd else "‏❌ نا-VIP"
-            bl_txt = "‏🚫 بلۆک" if bl else "‏✅ ئازاد"
-            adm_txt= "‏👮 ئەدمین" if admin else "‏👤 ئاسایی"
+            adm    = await db_get(f"admins/{target}")
+            vip_txt= f"💎 VIP ({vd.get('expires','')})" if vd else "❌ نا-VIP"
+            bl_txt = "🚫 بلۆک" if bl else "✅ ئازاد"
+            adm_txt = "🛡 ئەدمین" if adm else "👤 ئاسایی"
             msg    = (
-                f"‏👤 <b>زانیاری بەکارهێنەر</b>\n"
-                f"‏━━━━━━━━━━━━━━━━━━━\n"
-                f"‏🆔 ID: <code>{target}</code>\n"
-                f"‏📛 ناو: {html.escape(ud.get('name','ناسناو'))}\n"
-                f"‏🔗 یوزەر: @{ud.get('username','—')}\n"
-                f"‏💎 دۆخ: {vip_txt}\n"
-                f"‏🛡 بلۆک: {bl_txt}\n"
-                f"‏👮 ئەدمین: {adm_txt}\n"
-                f"‏⚠️ ئاگادارکردنەوە: {warns}\n"
-                f"‏🕐 دوایین چالاکی: {ud.get('last_seen','نییە')}"
+                f"👤 <b>زانیاری بەکارهێنەر</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"🆔 ID: <code>{target}</code>\n"
+                f"📛 ناو: {html.escape(ud.get('name','ناسناو'))}\n"
+                f"🔗 یوزەر: @{ud.get('username','—')}\n"
+                f"💎 دۆخ: {vip_txt}\n"
+                f"🛡 ئەدمین: {adm_txt}\n"
+                f"🚫 بلۆک: {bl_txt}\n"
+                f"⚠️ ئاگادارکردنەوە: {warns}\n"
+                f"🕐 کاتی دوایین چالاکی: {ud.get('last_seen','نییە')}"
             )
             await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_USERS)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     if state == "search_bot":
@@ -1307,13 +1367,13 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                    if txt.lower() in v.get("bot_username","").lower() or txt == k]
         await db_del(f"users/{uid}/state")
         if not results:
-            await update.message.reply_text("‏❌ بۆتێک نەدۆزرایەوە.", reply_markup=KB_BOTS)
+            await update.message.reply_text("❌ بۆتێک نەدۆزرایەوە.", reply_markup=KB_BOTS)
             return
-        lines = [f"‏🔍 <b>ئەنجامی گەڕان ({len(results)}):</b>\n"]
+        lines = [f"🔍 <b>ئەنجامی گەڕان ({len(results)}):</b>\n"]
         for bid, bd in results[:10]:
             st  = "🟢" if bd.get("status") == "running" else "🔴"
             own = bd.get("owner","؟")
-            lines.append(f"‏{st} @{bd.get('bot_username','—')}  خاوەن: <code>{own}</code>  ID: <code>{bid}</code>")
+            lines.append(f"{st} @{bd.get('bot_username','—')}  خاوەن: <code>{own}</code>  ID: <code>{bid}</code>")
         await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_BOTS)
         return
 
@@ -1321,30 +1381,76 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         info = await db_get(f"managed_bots/{txt.strip()}")
         await db_del(f"users/{uid}/state")
         if not info:
-            await update.message.reply_text("‏❌ بۆتێک بەم ID ەیە نەدۆزرایەوە.", reply_markup=KB_BOTS)
+            await update.message.reply_text("❌ بۆتێک بەم ID ەیە نەدۆزرایەوە.", reply_markup=KB_BOTS)
         else:
             await do_delete_bot(update, uid, txt.strip(), back_kb=KB_BOTS)
+        return
+
+    # ── ئەدمین ────────────────────────────────────────────────────────────
+    if state == "add_admin" and uid == OWNER_ID:
+        try:
+            target = int(txt.strip())
+            if target == OWNER_ID:
+                await update.message.reply_text("⚠️ خاوەنی بۆت پێشەکی ئەدمینی گەورەیە.", reply_markup=KB_ADMINS)
+                await db_del(f"users/{uid}/state")
+                return
+            ud = await db_get(f"users/{target}") or {}
+            await db_put(f"admins/{target}", {
+                "added_by": uid,
+                "date": now_str(),
+                "name": ud.get("name","ناسناو"),
+            })
+            await db_del(f"users/{uid}/state")
+            # ئاگادارکردنەوەی ئەدمینی نوێ
+            await send_tg(MASTER_TOKEN,"sendMessage",{
+                "chat_id": target,
+                "text": "‼️ <b>پیرۆزبێت!</b> 🎉\n\nتۆ بوویت بە ئەدمینی بۆتی سیستەم.\n🛡 ئێستا دەستتە بۆ پانێلی ئەدمین.",
+                "parse_mode": "HTML"
+            })
+            await update.message.reply_text(f"✅ بەکارهێنەری <code>{target}</code> بوو بە ئەدمین! 🛡", parse_mode="HTML", reply_markup=KB_ADMINS)
+        except:
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
+        return
+
+    if state == "del_admin" and uid == OWNER_ID:
+        try:
+            target = int(txt.strip())
+            adm = await db_get(f"admins/{target}")
+            await db_del(f"users/{uid}/state")
+            if adm:
+                await db_del(f"admins/{target}")
+                # ئاگادارکردنەوەی ئەدمینی لابراو
+                await send_tg(MASTER_TOKEN,"sendMessage",{
+                    "chat_id": target,
+                    "text": "⚠️ دەستێوەردانی ئەدمینەکەت لابرا.",
+                    "parse_mode": "HTML"
+                })
+                await update.message.reply_text(f"✅ ئەدمینی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_ADMINS)
+            else:
+                await update.message.reply_text(f"❌ بەکارهێنەری <code>{target}</code> ئەدمین نییە.", parse_mode="HTML", reply_markup=KB_ADMINS)
+        except:
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     # ── کانال ────────────────────────────────────────────────────────────
     if state == "change_main_channel":
         await db_put("system/channel", txt.strip().lstrip("@"))
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏✅ کانالی سەرەکی گۆڕدرا بۆ: @{txt.strip().lstrip('@')}", reply_markup=KB_CHAN)
+        await update.message.reply_text(f"✅ کانالی سەرەکی گۆڕدرا بۆ: @{txt.strip().lstrip('@')}", reply_markup=KB_CHAN)
         return
 
     if state == "add_req_channel":
         ch = txt.strip().lstrip("@")
         await db_put(f"system/req_channels/{ch}", True)
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏✅ کانالی @{ch} زیادکرا.", reply_markup=KB_CHAN)
+        await update.message.reply_text(f"✅ کانالی @{ch} زیادکرا.", reply_markup=KB_CHAN)
         return
 
     if state == "del_req_channel":
         ch = txt.strip().lstrip("@")
         await db_del(f"system/req_channels/{ch}")
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏✅ کانالی @{ch} لابرا.", reply_markup=KB_CHAN)
+        await update.message.reply_text(f"✅ کانالی @{ch} لابرا.", reply_markup=KB_CHAN)
         return
 
     if state == "check_member":
@@ -1352,127 +1458,72 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             target  = int(txt.strip())
             req_chs = await db_get("system/req_channels") or {}
             if not req_chs:
-                await update.message.reply_text("‏📭 هیچ کانالی داواکراوێک تۆمار نەکراوە.", reply_markup=KB_CHAN)
+                await update.message.reply_text("📭 هیچ کانالی داواکراوێک تۆمار نەکراوە.", reply_markup=KB_CHAN)
                 await db_del(f"users/{uid}/state")
                 return
-            lines = [f"‏🔍 <b>پشکنینی ئەندامی بەکارهێنەری <code>{target}</code></b>\n"]
+            lines = [f"🔍 <b>پشکنینی ئەندامی بەکارهێنەری <code>{target}</code></b>\n"]
             for ch in req_chs:
                 res = await send_tg(MASTER_TOKEN,"getChatMember",{"chat_id":f"@{ch}","user_id":target})
                 status = res.get("result",{}).get("status","unknown")
                 ok = status in ("member","administrator","creator")
-                lines.append(f"‏{'✅' if ok else '❌'} @{ch}: {status}")
+                lines.append(f"{'✅' if ok else '❌'} @{ch}: {status}")
             await db_del(f"users/{uid}/state")
             await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_CHAN)
         except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("⚠️ ID ی دروست بنووسە.")
         return
 
     # ── سیستەم ───────────────────────────────────────────────────────────
-    if state == "change_project_url" and uid == OWNER_ID:
+    if state == "change_project_url":
         await db_put("system/project_url", txt.strip())
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏✅ PROJECT URL گۆڕدرا بۆ:\n<code>{txt.strip()}</code>", parse_mode="HTML", reply_markup=KB_SYS)
+        await update.message.reply_text(f"✅ PROJECT URL گۆڕدرا بۆ:\n<code>{txt.strip()}</code>", parse_mode="HTML", reply_markup=KB_SYS)
         return
 
-    if state == "change_dev_channel" and uid == OWNER_ID:
+    if state == "change_dev_channel":
         await db_put("system/dev_channel", txt.strip().lstrip("@"))
         await db_del(f"users/{uid}/state")
-        await update.message.reply_text(f"‏✅ کانالی بەڕێوەبەر گۆڕدرا بۆ @{txt.strip().lstrip('@')}", reply_markup=KB_SYS)
+        await update.message.reply_text(f"✅ کانالی بەڕێوەبەر گۆڕدرا بۆ @{txt.strip().lstrip('@')}", reply_markup=KB_SYS)
         return
 
-    if state == "change_master_token" and uid == OWNER_ID:
+    if state == "change_photo_url":
+        await db_put("system/photo_url", txt.strip())
+        await db_del(f"users/{uid}/state")
+        await update.message.reply_text("✅ وێنەی بەخێرهاتن گۆڕدرا!", reply_markup=KB_SYS)
+        return
+
+    if state == "change_master_token":
         await db_put("system/master_token_note", txt.strip()[:10]+"...")
         await db_del(f"users/{uid}/state")
         await update.message.reply_text(
-            "‏⚠️ تۆکێنی سەرەکی لە Vercel Environment Variables دەگۆڕێت، نەک لێرە.\n"
-            "‏تۆکێنەکەت تۆمارکرا، تکایە لە Vercel گۆڕی.",
+            "⚠️ تۆکێنی سەرەکی لە Vercel Environment Variables دەگۆڕێت، نەک لێرە.\n"
+            "تۆکێنەکەت تۆمارکرا، تکایە لە Vercel گۆڕی.",
             reply_markup=KB_SYS,
         )
         return
 
-    if state == "confirm_clear_db" and uid == OWNER_ID:
+    if state == "confirm_clear_db":
         if txt == "✅ بەڵێ، پاک بکەرەوە":
             await db_del("users")
             await db_del("managed_bots")
             await db_del("bot_users")
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏✅ داتابەیس پاک کرایەوە.", reply_markup=KB_SYS)
+            await update.message.reply_text("✅ داتابەیس پاک کرایەوە.", reply_markup=KB_SYS)
         else:
             await db_del(f"users/{uid}/state")
-            await update.message.reply_text("‏↩️ هەڵوەشاندرایەوە.", reply_markup=KB_SYS)
+            await update.message.reply_text("↩️ هەڵوەشاندرایەوە.", reply_markup=KB_SYS)
         return
 
-    if state == "confirm_restart" and uid == OWNER_ID:
+    if state == "confirm_restart":
         await db_del(f"users/{uid}/state")
         if txt == "✅ بەڵێ، ڕیستارت بکە":
-            await update.message.reply_text("‏🔃 ڕیستارت ئەنجامدرا...\n\n‏⚠️ تێبینی: ڕیستارتی ڕاستەقینە پێویستی بە Vercel CLI ئەکات.", reply_markup=KB_SYS)
+            await update.message.reply_text("🔃 ڕیستارت ئەنجامدرا...\n\n⚠️ تێبینی: ڕیستارتی ڕاستەقینە پێویستی بە Vercel CLI ئەکات.", reply_markup=KB_SYS)
         else:
-            await update.message.reply_text("‏↩️ هەڵوەشاندرایەوە.", reply_markup=KB_SYS)
-        return
-
-    # ── ئەدمین دۆخەکان ────────────────────────────────────────────────────
-    if state == "add_admin" and uid == OWNER_ID:
-        try:
-            target = int(txt.strip())
-            if target == OWNER_ID:
-                await update.message.reply_text("‏⚠️ خاوەنەکە بە خۆی ئەدمینە.", reply_markup=KB_ADMINS)
-                await db_del(f"users/{uid}/state")
-                return
-            ud = await db_get(f"users/{target}") or {}
-            await db_put(f"system/admins/{target}", {
-                "name": ud.get("name","ناسناو"),
-                "added_by": uid,
-                "date": now_str()
-            })
-            await db_del(f"users/{uid}/state")
-            # ئاگادار بکەرەوەی ئەدمین
-            await send_tg(MASTER_TOKEN,"sendMessage",{
-                "chat_id":target,
-                "text":"‏👮 <b>پتر بووتە ئەدمینی بۆتی سەرەکی!</b>\n\n‏دەتوانیت ئێستا بەشی پانێلی ئەدمین بەکار بهێنیت.",
-                "parse_mode":"HTML"
-            })
-            await update.message.reply_text(f"‏✅ بەکارهێنەری <code>{target}</code> بوو بە ئەدمین!", parse_mode="HTML", reply_markup=KB_ADMINS)
-        except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
-        return
-
-    if state == "del_admin" and uid == OWNER_ID:
-        try:
-            target = int(txt.strip())
-            await db_del(f"system/admins/{target}")
-            await db_del(f"users/{uid}/state")
-            await send_tg(MASTER_TOKEN,"sendMessage",{
-                "chat_id":target,
-                "text":"‏⚠️ دەستی ئەدمینیت لابرا.",
-                "parse_mode":"HTML"
-            })
-            await update.message.reply_text(f"‏✅ ئەدمینی <code>{target}</code> لابرا.", parse_mode="HTML", reply_markup=KB_ADMINS)
-        except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
-        return
-
-    if state == "admin_info_id" and uid == OWNER_ID:
-        try:
-            target = int(txt.strip())
-            ad = await db_get(f"system/admins/{target}")
-            await db_del(f"users/{uid}/state")
-            if ad:
-                msg = (
-                    f"‏👮 <b>زانیاری ئەدمین</b>\n"
-                    f"‏━━━━━━━━━━━━━━━━━━━\n"
-                    f"‏🆔 ID: <code>{target}</code>\n"
-                    f"‏📛 ناو: {html.escape(ad.get('name','ناسناو'))}\n"
-                    f"‏📅 بەرواری زیادکردن: {ad.get('date','نییە')}"
-                )
-                await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_ADMINS)
-            else:
-                await update.message.reply_text(f"‏❌ <code>{target}</code> ئەدمین نییە.", parse_mode="HTML", reply_markup=KB_ADMINS)
-        except:
-            await update.message.reply_text("‏⚠️ ID ی دروست بنووسە.")
+            await update.message.reply_text("↩️ هەڵوەشاندرایەوە.", reply_markup=KB_SYS)
         return
 
     # ── هەر شتێکی تر ──────────────────────────────────────────────────────
-    await update.message.reply_text("‏تکایە لە کیبۆردی خوارەوە هەڵبژێرە 👇", reply_markup=kb_main(uid))
+    await update.message.reply_text("تکایە لە کیبۆردی خوارەوە هەڵبژێرە 👇", reply_markup=kb_main(uid))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1482,15 +1533,15 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
 async def owner_list_users(update: Update, full: bool = False):
     all_u = await db_get("users") or {}
     if not all_u:
-        await update.message.reply_text("‏📭 هیچ بەکارهێنەرێک نییە.", reply_markup=KB_USERS)
+        await update.message.reply_text("📭 هیچ بەکارهێنەرێک نییە.", reply_markup=KB_USERS)
         return
-    lines = [f"‏👥 <b>لیستی بەکارهێنەران ({len(all_u)}):</b>\n"]
+    lines = [f"👥 <b>لیستی بەکارهێنەران ({len(all_u)}):</b>\n"]
     for u_id, ud in list(all_u.items())[:50]:
         n  = html.escape(ud.get("name","ناسناو"))
         un = f"@{ud['username']}" if ud.get("username") else "—"
-        lines.append(f"‏• <a href='tg://user?id={u_id}'>{n}</a> {un} <code>{u_id}</code>")
+        lines.append(f"• <a href='tg://user?id={u_id}'>{n}</a> {un} <code>{u_id}</code>")
     if len(all_u) > 50:
-        lines.append(f"\n‏... و {len(all_u)-50} بەکارهێنەری تری دیکە")
+        lines.append(f"\n... و {len(all_u)-50} بەکارهێنەری تری دیکە")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_USERS)
 
 
@@ -1499,28 +1550,30 @@ async def owner_user_stats(update: Update):
     all_v  = await db_get("vip")     or {}
     all_bl = await db_get("blocked") or {}
     all_w  = await db_get("warnings") or {}
+    admins = await db_get("admins")  or {}
     vip_ids= set(all_v.keys())
     msg    = (
-        "‏📊 <b>ئامارەکانی بەکارهێنەران</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏👥 کۆی بەکارهێنەران: <b>{len(all_u)}</b>\n"
-        f"‏💎 VIPەکان: <b>{len(all_v)}</b>\n"
-        f"‏🚫 بلۆکەکان: <b>{len(all_bl)}</b>\n"
-        f"‏⚠️ ئاگادارکراوەکان: <b>{len(all_w)}</b>\n"
-        f"‏👤 نا-VIP: <b>{len(all_u) - len([i for i in all_u if i in vip_ids])}</b>"
+        "📊 <b>ئامارەکانی بەکارهێنەران</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 کۆی بەکارهێنەران: <b>{len(all_u)}</b>\n"
+        f"💎 VIPەکان: <b>{len(all_v)}</b>\n"
+        f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
+        f"🚫 بلۆکەکان: <b>{len(all_bl)}</b>\n"
+        f"⚠️ ئاگادارکراوەکان: <b>{len(all_w)}</b>\n"
+        f"👤 نا-VIP: <b>{len(all_u) - len([i for i in all_u if i in vip_ids])}</b>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_USERS)
 
 
 async def owner_export_users(update: Update):
     all_u = await db_get("users") or {}
-    lines = ["‏ID | ناو | یوزەر | کاتی دوایین چالاکی"]
+    lines = ["ID | ناو | یوزەر | کاتی دوایین چالاکی"]
     for u_id, ud in all_u.items():
-        lines.append(f"‏{u_id} | {ud.get('name','')} | @{ud.get('username','')} | {ud.get('last_seen','')}")
+        lines.append(f"{u_id} | {ud.get('name','')} | @{ud.get('username','')} | {ud.get('last_seen','')}")
     txt = "\n".join(lines)
-    msg = f"‏📤 <b>لیستی بەکارهێنەران ({len(all_u)}):</b>\n\n<code>{html.escape(txt[:3500])}</code>"
+    msg = f"📤 <b>لیستی بەکارهێنەران ({len(all_u)}):</b>\n\n<code>{html.escape(txt[:3500])}</code>"
     if len(all_u) > 60:
-        msg += f"\n\n‏... و {len(all_u)-60} بەکارهێنەری دیکە"
+        msg += f"\n\n... و {len(all_u)-60} بەکارهێنەری دیکە"
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_USERS)
 
 
@@ -1529,14 +1582,14 @@ async def owner_list_bots(update: Update, filter_status=None):
     if filter_status:
         all_b = {k:v for k,v in all_b.items() if v.get("status") == filter_status}
     if not all_b:
-        await update.message.reply_text("‏📭 هیچ بۆتێک نییە.", reply_markup=KB_BOTS)
+        await update.message.reply_text("📭 هیچ بۆتێک نییە.", reply_markup=KB_BOTS)
         return
-    lines = [f"‏🤖 <b>بۆتەکان ({len(all_b)}):</b>\n"]
+    lines = [f"🤖 <b>بۆتەکان ({len(all_b)}):</b>\n"]
     for bid, bd in list(all_b.items())[:40]:
         st  = "🟢" if bd.get("status") == "running" else "🔴"
         own = bd.get("owner","؟")
         bu  = await db_get(f"bot_users/{bid}") or {}
-        lines.append(f"‏{st} @{bd.get('bot_username','—')}  👥{len(bu)}  خاوەن:<code>{own}</code>  ID:<code>{bid}</code>")
+        lines.append(f"{st} @{bd.get('bot_username','—')}  👥{len(bu)}  خاوەن:<code>{own}</code>  ID:<code>{bid}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_BOTS)
 
 
@@ -1548,12 +1601,12 @@ async def owner_bot_stats(update: Update):
         bu = await db_get(f"bot_users/{bid}") or {}
         total_users += len(bu)
     msg = (
-        "‏📊 <b>ئامارەکانی بۆتەکان</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏🤖 کۆی بۆتەکان: <b>{len(all_b)}</b>\n"
-        f"‏🟢 چالاک: <b>{run}</b>\n"
-        f"‏🔴 ڕاگیراو: <b>{len(all_b)-run}</b>\n"
-        f"‏👥 کۆی بەکارهێنەران: <b>{total_users}</b>"
+        "📊 <b>ئامارەکانی بۆتەکان</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 کۆی بۆتەکان: <b>{len(all_b)}</b>\n"
+        f"🟢 چالاک: <b>{run}</b>\n"
+        f"🔴 ڕاگیراو: <b>{len(all_b)-run}</b>\n"
+        f"👥 کۆی بەکارهێنەران: <b>{total_users}</b>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_BOTS)
 
@@ -1566,18 +1619,18 @@ async def owner_all_bots_action(update: Update, new_status: str):
         await db_put(f"managed_bots/{bid}", bd)
         count += 1
     icon = "🟢" if new_status == "running" else "🔴"
-    await update.message.reply_text(f"‏{icon} <b>{count}</b> بۆت {('دەستی پێکرد' if new_status=='running' else 'وەستاندرا')}.", parse_mode="HTML", reply_markup=KB_BOTS)
+    await update.message.reply_text(f"{icon} <b>{count}</b> بۆت {('دەستی پێکرد' if new_status=='running' else 'وەستاندرا')}.", parse_mode="HTML", reply_markup=KB_BOTS)
 
 
 async def owner_list_vips(update: Update):
     all_v = await db_get("vip") or {}
     if not all_v:
-        await update.message.reply_text("‏📭 هیچ VIPێک نییە.", reply_markup=KB_VIP)
+        await update.message.reply_text("📭 هیچ VIPێک نییە.", reply_markup=KB_VIP)
         return
-    lines = [f"‏💎 <b>لیستی VIPەکان ({len(all_v)}):</b>\n"]
+    lines = [f"💎 <b>لیستی VIPەکان ({len(all_v)}):</b>\n"]
     for v_id, vd in list(all_v.items())[:40]:
         exp = vd.get("expires","نییە")
-        lines.append(f"‏• <code>{v_id}</code> ⏰ {exp}")
+        lines.append(f"• <code>{v_id}</code> ⏰ {exp}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_VIP)
 
 
@@ -1586,11 +1639,11 @@ async def owner_vip_stats(update: Update):
     life  = sum(1 for v in all_v.values() if v.get("expires") == "lifetime")
     timed = len(all_v) - life
     msg   = (
-        "‏📊 <b>ئامارەکانی VIP</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏💎 کۆی VIPەکان: <b>{len(all_v)}</b>\n"
-        f"‏♾ هەمیشەیی: <b>{life}</b>\n"
-        f"‏⏰ کاتی دیاریکراو: <b>{timed}</b>"
+        "📊 <b>ئامارەکانی VIP</b>\n"
+        "━━━━━━━━━━━━━━━━\n"
+        f"💎 کۆی VIPەکان: <b>{len(all_v)}</b>\n"
+        f"♾ هەمیشەیی: <b>{life}</b>\n"
+        f"⏰ کاتی دیاریکراو: <b>{timed}</b>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_VIP)
 
@@ -1598,30 +1651,30 @@ async def owner_vip_stats(update: Update):
 async def owner_list_blocked(update: Update):
     all_bl = await db_get("blocked") or {}
     if not all_bl:
-        await update.message.reply_text("‏📭 هیچ بلۆکێک نییە.", reply_markup=KB_SEC)
+        await update.message.reply_text("📭 هیچ بلۆکێک نییە.", reply_markup=KB_SEC)
         return
-    lines = [f"‏🚫 <b>بلۆکەکان ({len(all_bl)}):</b>\n"]
+    lines = [f"🚫 <b>بلۆکەکان ({len(all_bl)}):</b>\n"]
     for bid in list(all_bl.keys())[:40]:
-        lines.append(f"‏• <code>{bid}</code>")
+        lines.append(f"• <code>{bid}</code>")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_SEC)
 
 
 async def owner_list_warned(update: Update):
     all_w = await db_get("warnings") or {}
     if not all_w:
-        await update.message.reply_text("‏📭 هیچ ئاگادارکراوێک نییە.", reply_markup=KB_SEC)
+        await update.message.reply_text("📭 هیچ ئاگادارکراوێک نییە.", reply_markup=KB_SEC)
         return
-    lines = [f"‏⚠️ <b>ئاگادارکراوەکان ({len(all_w)}):</b>\n"]
+    lines = [f"⚠️ <b>ئاگادارکراوەکان ({len(all_w)}):</b>\n"]
     for w_id, cnt in list(all_w.items())[:40]:
-        lines.append(f"‏• <code>{w_id}</code> — ⚠️ {cnt} جار")
+        lines.append(f"• <code>{w_id}</code> — ⚠️ {cnt} جار")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_SEC)
 
 
 async def owner_toggle_alert_mode(update: Update, uid: int):
     cur = await db_get("system/alert_mode") or False
     await db_put("system/alert_mode", not cur)
-    state = "‏چالاک ✅" if not cur else "‏لەکارخراو ❌"
-    await update.message.reply_text(f"‏🛡 مۆدی ئاگادارکردنەوە: <b>{state}</b>", parse_mode="HTML", reply_markup=KB_SEC)
+    state = "چالاک ✅" if not cur else "لەکارخراو ❌"
+    await update.message.reply_text(f"🛡 مۆدی ئاگادارکردنەوە: <b>{state}</b>", parse_mode="HTML", reply_markup=KB_SEC)
 
 
 async def owner_list_channels(update: Update):
@@ -1629,17 +1682,17 @@ async def owner_list_channels(update: Update):
     req_chs = await db_get("system/req_channels") or {}
     fj      = await db_get("system/force_join") or False
     msg     = (
-        "‏📢 <b>زانیاری کانالەکان</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏📢 کانالی سەرەکی: @{main_ch}\n"
-        f"‏✅ داواکردنی ئەندامبوون: {'چالاک' if fj else 'لەکارخراو'}\n\n"
-        f"‏📋 کانالە داواکراوەکان ({len(req_chs)}):\n"
+        "📢 <b>زانیاری کانالەکان</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"📢 کانالی سەرەکی: @{main_ch}\n"
+        f"✅ داواکردنی ئەندامبوون: {'چالاک' if fj else 'لەکارخراو'}\n\n"
+        f"📋 کانالە داواکراوەکان ({len(req_chs)}):\n"
     )
     if req_chs:
         for ch in req_chs:
-            msg += f"‏• @{ch}\n"
+            msg += f"• @{ch}\n"
     else:
-        msg += "‏نییە"
+        msg += "نییە"
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_CHAN)
 
 
@@ -1647,39 +1700,100 @@ async def owner_channel_stats(update: Update):
     req_chs = await db_get("system/req_channels") or {}
     fj      = await db_get("system/force_join")   or False
     msg     = (
-        "‏📊 <b>ئامارەکانی کانال</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏📋 کانالە داواکراوەکان: <b>{len(req_chs)}</b>\n"
-        f"‏✅ داواکردنی ئەندامبوون: <b>{'چالاک' if fj else 'لەکارخراو'}</b>"
+        "📊 <b>ئامارەکانی کانال</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"📋 کانالە داواکراوەکان: <b>{len(req_chs)}</b>\n"
+        f"✅ داواکردنی ئەندامبوون: <b>{'چالاک' if fj else 'لەکارخراو'}</b>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_CHAN)
+
+
+# ── فەنکشنەکانی ئەدمین ───────────────────────────────────────────────────────
+async def owner_list_admins(update: Update):
+    admins = await db_get("admins") or {}
+    if not admins:
+        await update.message.reply_text("📭 هیچ ئەدمینێک نییە.", reply_markup=KB_ADMINS)
+        return
+    lines = [f"👨‍💼 <b>لیستی ئەدمینەکان ({len(admins)}):</b>\n"]
+    for a_id, ad in list(admins.items())[:40]:
+        name = html.escape(ad.get("name","ناسناو"))
+        date = ad.get("date","نییە")
+        lines.append(f"• <a href='tg://user?id={a_id}'>{name}</a> <code>{a_id}</code> — زیادکرا: {date}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_ADMINS)
+
+
+async def owner_admin_stats(update: Update):
+    admins = await db_get("admins") or {}
+    msg = (
+        "📊 <b>ئامارەکانی ئەدمینەکان</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"👨‍💼 کۆی ئەدمینەکان: <b>{len(admins)}</b>\n"
+        f"👑 خاوەنی سیستەم: <b>1</b> (سەرەکی)"
+    )
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_ADMINS)
+
+
+# ── فەنکشنەکانی ئاگادارکردنەوە ──────────────────────────────────────────────
+async def owner_notif_history(update: Update):
+    hist = await db_get("system/notif_history") or []
+    if not hist:
+        await update.message.reply_text("📭 هیچ مێژووی ئاگادارکردنەوەیەک نییە.", reply_markup=KB_NOTIF)
+        return
+    if isinstance(hist, dict): hist = list(hist.values())
+    lines = ["📋 <b>مێژووی ئاگادارکردنەوە:</b>\n"]
+    for h in hist[:15]:
+        tp   = h.get("type","—")
+        sent = h.get("sent",0)
+        fail = h.get("fail",0)
+        tm   = h.get("time","—")
+        lines.append(f"🔔 {tm} | {tp} | ✅{sent} ❌{fail}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_NOTIF)
+
+
+async def show_user_notifications(update: Update, uid: int):
+    """نیشاندانی ئاگادارکردنەوەکانی بەکارهێنەر"""
+    notif_on = await db_get("system/notifications_enabled")
+    user_notif = await db_get(f"users/{uid}/notifications_off") or False
+    msg = (
+        "🔔 <b>ئاگادارکردنەوەکانت</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"📢 دۆخی سیستەم: {'✅ چالاک' if notif_on else '❌ لەکارخراو'}\n"
+        f"👤 ئاگادارکردنەوەی تۆ: {'❌ کوژاوە' if user_notif else '✅ چالاک'}\n"
+    )
+    kb = ReplyKeyboardMarkup([
+        [KeyboardButton("🔕 کوژاندنەوەی ئاگادارکردنەوەم" if not user_notif else "🔔 چالاككردنی ئاگادارکردنەوەم")],
+        [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+    ], resize_keyboard=True)
+    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb)
 
 
 async def owner_sys_info(update: Update):
     all_b  = await db_get("managed_bots") or {}
     all_u  = await db_get("users")         or {}
-    admins = await db_get("system/admins") or {}
+    admins = await db_get("admins")        or {}
     run    = sum(1 for v in all_b.values() if v.get("status") == "running")
     purl   = await db_get("system/project_url") or PROJECT_URL or "نەدۆزرایەوە"
     fj     = await db_get("system/force_join")  or False
     am     = await db_get("system/alert_mode")  or False
+    notif  = await db_get("system/notifications_enabled") or False
     msg    = (
-        f"‏⚙️ <b>زانیاری سیستەم</b>\n"
-        f"‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏🌐 PROJECT URL: <code>{purl}</code>\n"
-        f"‏👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
-        f"‏🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run})\n"
-        f"‏👮 ئەدمینەکان: <b>{len(admins)}</b>\n"
-        f"‏✅ داواکردنی کانال: <b>{'چالاک' if fj else 'لەکارخراو'}</b>\n"
-        f"‏🛡 مۆدی ئاگادارکردنەوە: <b>{'چالاک' if am else 'لەکارخراو'}</b>\n"
-        f"‏⏰ کاتی ئێستا: <b>{now_str()}</b>"
+        f"⚙️ <b>زانیاری سیستەم</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🌐 PROJECT URL: <code>{purl}</code>\n"
+        f"👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
+        f"🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run})\n"
+        f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
+        f"📢 داواکردنی کانال: <b>{'چالاک' if fj else 'لەکارخراو'}</b>\n"
+        f"🛡 مۆدی ئاگادارکردنەوە: <b>{'چالاک' if am else 'لەکارخراو'}</b>\n"
+        f"🔔 ئاگادارکردنەوەکان: <b>{'چالاک' if notif else 'لەکارخراو'}</b>\n"
+        f"⏰ کاتی ئێستا: <b>{now_str()}</b>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_SYS)
 
 
 async def owner_refresh_all_webhooks(update: Update):
     all_b = await db_get("managed_bots") or {}
-    sm    = await update.message.reply_text(f"‏⏳ نوێکردنەوەی {len(all_b)} وەبهووک...")
+    sm    = await update.message.reply_text(f"⏳ نوێکردنەوەی {len(all_b)} وەبهووک...")
     ok=fail=0
     safe  = (PROJECT_URL or "").rstrip('/')
     for bid, bd in all_b.items():
@@ -1690,28 +1804,31 @@ async def owner_refresh_all_webhooks(update: Update):
         if r.get("ok"): ok+=1
         else: fail+=1
         await asyncio.sleep(0.1)
-    await sm.edit_text(f"‏✅ وەبهووک نوێکرایەوە!\n‏✅ سەرکەوتوو: {ok}  ❌ هەڵە: {fail}", reply_markup=KB_SYS)
+    await sm.edit_text(f"✅ وەبهووک نوێکرایەوە!\n✅ سەرکەوتوو: {ok}  ❌ هەڵە: {fail}", reply_markup=KB_SYS)
 
 
 async def owner_backup_db(update: Update):
-    all_b = await db_get("managed_bots") or {}
-    all_u = await db_get("users")         or {}
-    all_v = await db_get("vip")           or {}
+    all_b  = await db_get("managed_bots") or {}
+    all_u  = await db_get("users")         or {}
+    all_v  = await db_get("vip")           or {}
+    admins = await db_get("admins")        or {}
     backup = {
         "time":         now_str(),
         "users_count":  len(all_u),
         "bots_count":   len(all_b),
         "vip_count":    len(all_v),
+        "admin_count":  len(admins),
         "bot_usernames":[v.get("bot_username","") for v in all_b.values()],
     }
     msg = (
-        "‏💾 <b>پشتگیری داتابەیس</b>\n"
-        "‏━━━━━━━━━━━━━━━━━━━\n"
-        f"‏⏰ کات: {backup['time']}\n"
-        f"‏👥 بەکارهێنەران: {backup['users_count']}\n"
-        f"‏🤖 بۆتەکان: {backup['bots_count']}\n"
-        f"‏💎 VIPەکان: {backup['vip_count']}\n"
-        f"‏🤖 ناوی بۆتەکان:\n<code>{', '.join(backup['bot_usernames'][:20])}</code>"
+        "💾 <b>پشتگیری داتابەیس</b>\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        f"⏰ کات: {backup['time']}\n"
+        f"👥 بەکارهێنەران: {backup['users_count']}\n"
+        f"🤖 بۆتەکان: {backup['bots_count']}\n"
+        f"💎 VIPەکان: {backup['vip_count']}\n"
+        f"👨‍💼 ئەدمینەکان: {backup['admin_count']}\n"
+        f"🤖 ناوی بۆتەکان:\n<code>{', '.join(backup['bot_usernames'][:20])}</code>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_SYS)
 
@@ -1719,65 +1836,52 @@ async def owner_backup_db(update: Update):
 async def owner_show_logs(update: Update):
     logs = await db_get("system/logs") or []
     if not logs:
-        await update.message.reply_text("‏📭 هیچ لۆگێک نییە.", reply_markup=KB_SYS)
+        await update.message.reply_text("📭 هیچ لۆگێک نییە.", reply_markup=KB_SYS)
         return
     if isinstance(logs, dict): logs = list(logs.values())
-    lines = ["‏📋 <b>دوایین لۆگەکان:</b>\n"]
+    lines = ["📋 <b>دوایین لۆگەکان:</b>\n"]
     for log in logs[:15]:
-        lines.append(f"‏• {log}")
+        lines.append(f"• {log}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_SYS)
 
 
 async def owner_broadcast_history(update: Update):
     hist = await db_get("system/bc_history") or []
     if not hist:
-        await update.message.reply_text("‏📭 هیچ مێژووێکی بڵاوکردنەوە نییە.", reply_markup=KB_MSG)
+        await update.message.reply_text("📭 هیچ مێژووی بڵاوکردنەوە نییە.", reply_markup=KB_MSG)
         return
     if isinstance(hist, dict): hist = list(hist.values())
-    lines = ["‏📜 <b>مێژووی بڵاوکردنەوە:</b>\n"]
+    lines = ["📜 <b>مێژووی بڵاوکردنەوە:</b>\n"]
     for h in hist[:15]:
         tp   = h.get("type","—")
         sent = h.get("sent",0)
         fail = h.get("fail",0)
         tm   = h.get("time","—")
-        lines.append(f"‏📤 {tm} | {tp} | ✅{sent} ❌{fail}")
+        lines.append(f"📤 {tm} | {tp} | ✅{sent} ❌{fail}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_MSG)
-
-
-async def owner_list_admins(update: Update):
-    admins = await db_get("system/admins") or {}
-    if not admins:
-        await update.message.reply_text("‏📭 هیچ ئەدمینێک نییە.", reply_markup=KB_ADMINS)
-        return
-    lines = [f"‏👮 <b>لیستی ئەدمینەکان ({len(admins)}):</b>\n"]
-    for a_id, ad in list(admins.items())[:40]:
-        n   = html.escape(ad.get("name","ناسناو"))
-        dt  = ad.get("date","—")
-        lines.append(f"‏• <code>{a_id}</code> — {n} — 📅{dt}")
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_ADMINS)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── چالاككردنی تۆکێن
 # ══════════════════════════════════════════════════════════════════════════════
 async def activate_token(update: Update, uid: int, token: str):
-    sm = await update.message.reply_text("‏⏳ خەریکی پشکنین و چالاككردنم...")
+    sm = await update.message.reply_text("⏳ خەریکی پشکنین و چالاككردنم...")
     try:
         res = await send_tg(token,"getMe",{})
         if not res.get("ok"):
-            await sm.edit_text("‏❌ تۆکێنەکە هەڵەیە یان کار ناکات.")
+            await sm.edit_text("❌ تۆکێنەکە هەڵەیە یان کار ناکات.")
             return
         bi  = res["result"]
         bid = str(bi["id"])
         bun = bi["username"]
         bnm = bi["first_name"]
         if await db_get(f"managed_bots/{bid}"):
-            await sm.edit_text(f"‏⚠️ بۆتی @{bun} پێشتر تۆمارکراوە!")
+            await sm.edit_text(f"⚠️ بۆتی @{bun} پێشتر تۆمارکراوە!")
             return
         safe = (PROJECT_URL or "").rstrip('/')
         wh   = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post"]})
         if not wh.get("ok"):
-            await sm.edit_text("‏❌ هەڵەیەک ڕوویدا لە بەستنەوەی وەبهووک.")
+            await sm.edit_text("❌ هەڵەیەک ڕوویدا لە بەستنەوەی وەبهووک.")
             return
         await db_put(f"managed_bots/{bid}",{
             "token":token,"owner":uid,"bot_username":bun,
@@ -1785,15 +1889,15 @@ async def activate_token(update: Update, uid: int, token: str):
         })
         await db_del(f"users/{uid}/state")
         await sm.edit_text(
-            f"‏✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
-            f"‏🤖 ناو: {html.escape(bnm)}\n‏🔗 یوزەر: @{bun}\n‏🆔 ID: <code>{bid}</code>\n\n"
-            "‏📌 زیادی بکە بۆ گروپ/کانالت و ئادمینی بکە ✅",
+            f"✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
+            f"🤖 ناو: {html.escape(bnm)}\n🔗 یوزەر: @{bun}\n🆔 ID: <code>{bid}</code>\n\n"
+            "📌 زیادی بکە بۆ گروپ/کانالت و ئادمینی بکە ✅",
             parse_mode="HTML",
         )
-        await update.message.reply_text("‏📂 لە 'بۆتەکانم' کۆنترۆڵی بکە:", reply_markup=kb_main(uid))
+        await update.message.reply_text("📂 لە 'بۆتەکانم' کۆنترۆڵی بکە:", reply_markup=kb_main(uid))
     except Exception as e:
         logger.error(f"activate: {e}")
-        await sm.edit_text(f"‏❌ هەڵەیەکی چاوەڕواننەکراو:\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
+        await sm.edit_text(f"❌ هەڵەیەکی چاوەڕواننەکراو:\n<code>{html.escape(str(e))}</code>", parse_mode="HTML")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1810,7 +1914,7 @@ async def do_delete_bot(update: Update, uid: int, bid: str, back_kb=None):
     await db_del(f"users/{uid}/selected_bot")
     await db_del(f"users/{uid}/state")
     kb = back_kb if back_kb else kb_main(uid)
-    await update.message.reply_text(f"‏🗑 <b>بۆتی @{un} بە تەواوی سڕایەوە!</b>", parse_mode="HTML", reply_markup=kb)
+    await update.message.reply_text(f"🗑 <b>بۆتی @{un} بە تەواوی سڕایەوە!</b>", parse_mode="HTML", reply_markup=kb)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1826,8 +1930,10 @@ async def process_child_update(token: str, body: dict):
         bnm  = info.get("bot_name","Reaction Bot")
         wlcm = info.get("welcome_msg","")
 
-        sys_chan     = await db_get("system/channel")      or CHANNEL_USER
-        photo_fid    = await db_get("system/photo_file_id") or None
+        sys_photo = await db_get("system/photo_url") or PHOTO_URL
+        sys_chan  = await db_get("system/channel")   or CHANNEL_USER
+        req_chs   = await db_get("system/req_channels") or {}
+        fj        = await db_get("system/force_join") or False
 
         msg = body.get("message") or body.get("channel_post")
         if not msg: return
@@ -1843,30 +1949,29 @@ async def process_child_update(token: str, body: dict):
         if from_user.get("id"):
             await db_patch(f"bot_users/{bid}/{user_id}", {"name": from_user.get("first_name",""), "chat_id": chat_id})
 
-        # خێرایی بەپێی VIP
-        vip_user = await is_vip(user_id)
-
         async with httpx.AsyncClient(timeout=10) as c:
             if txt.startswith("/start"):
-                # پشکنینی فۆرس جۆین
-                fj = await db_get("system/force_join")
-                if fj:
-                    req_chs = await db_get("system/req_channels") or {}
+                # پشکنینی جۆینی ناچاری کەناڵ
+                if fj and req_chs and from_user.get("id"):
                     not_joined = []
                     for ch in req_chs:
-                        res = await send_tg(token,"getChatMember",{"chat_id":f"@{ch}","user_id":user_id})
-                        status = res.get("result",{}).get("status","left")
-                        if status in ("left","kicked"):
+                        try:
+                            res = await send_tg(token, "getChatMember", {"chat_id": f"@{ch}", "user_id": user_id})
+                            status = res.get("result", {}).get("status", "left")
+                            if status not in ("member","administrator","creator"):
+                                not_joined.append(ch)
+                        except:
                             not_joined.append(ch)
                     if not_joined:
-                        lines = ["‏📢 <b>تکایە سەرەتا ئەندامی ئەم کانالانە بە:</b>\n"]
+                        kb_rows = [[{"text": f"📢 ئەندامبوون لە @{ch}", "url": f"https://t.me/{ch}"}] for ch in not_joined]
+                        join_msg = "‼️ <b>تکایە سەرەتا ئەندامی کانالەکانمان بە:</b>\n\n"
                         for ch in not_joined:
-                            lines.append(f"‏• @{ch}")
-                        lines.append("\n‏⬆️ دوای ئەندامبوون، /start بنووسە")
+                            join_msg += f"• @{ch}\n"
                         await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                            "chat_id":chat_id,
-                            "text":"\n".join(lines),
-                            "parse_mode":"HTML",
+                            "chat_id": chat_id,
+                            "text": join_msg,
+                            "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": kb_rows},
                         })
                         return
 
@@ -1876,52 +1981,30 @@ async def process_child_update(token: str, body: dict):
                     caption = wlcm.replace("{name}", user_name)
                 else:
                     caption = (
-                        f"‏سڵاو، <a href='tg://user?id={user_id}'>{user_name}</a> 👋\n\n"
-                        f"‏من بۆتی ڕیاکشنم 🍓 ناوم <b>{html.escape(bnm)}</b>ە\n\n"
-                        f"‏کارەکەم ئەوەیە کە بۆ هەموو نامەیەک ڕیاکشن بنێرم:\n"
-                        f"‏{' '.join(EMOJIS)}\n\n"
-                        "‏دەتوانم لە گروپ، کانال و چاتی تایبەتدا کار بکەم 🌼\n"
-                        "‏تەنها زیادم بکە بۆ گروپ یان کانالەکەت و ئادمینم بکە ☘️\n"
-                        "‏ئینجا بۆ هەموو نامەیەک ئیموجی دەنێرم 💗"
+                        f"سڵاو، <a href='tg://user?id={user_id}'>{user_name}</a> 👋\n\n"
+                        f"من بۆتی ڕیاکشنم 🍓 ناوم <b>{html.escape(bnm)}</b>ە\n\n"
+                        f"کارەکەم ئەوەیە کە بۆ هەموو نامەیەک ڕیاکشن بنێرم:\n"
+                        f"{' '.join(EMOJIS)}\n\n"
+                        "دەتوانم لە گروپ، کانال و چاتی تایبەتدا کار بکەم 🌼\n"
+                        "تەنها زیادم بکە بۆ گروپ یان کانالەکەت و ئادمینم بکە ☘️\n"
+                        "ئینجا بۆ هەموو نامەیەک ئیموجی دەنێرم 💗"
                     )
                 if notice:
-                    caption += f"\n\n‏📌 <b>تێبینی:</b> {notice}"
+                    caption += f"\n\n📌 <b>تێبینی:</b> {notice}"
 
                 keyboard = {"inline_keyboard": [
-                    [{"text":"‏📢 کانالی بەڕێوەبەر","url":f"https://t.me/{sys_chan}"}],
+                    [{"text":"📢 کانالی بەڕێوەبەر","url":f"https://t.me/{sys_chan}"}],
                     [
-                        {"text":"‏➕ زیادکردن بۆ گروپ", "url":f"https://t.me/{bun}?startgroup=new"},
-                        {"text":"‏➕ زیادکردن بۆ کانال","url":f"https://t.me/{bun}?startchannel=new"},
+                        {"text":"➕ زیادکردن بۆ گروپ", "url":f"https://t.me/{bun}?startgroup=new"},
+                        {"text":"➕ زیادکردن بۆ کانال","url":f"https://t.me/{bun}?startchannel=new"},
                     ],
-                    [{"text":"‏👨‍💻 بەرنامەنووس","url":f"tg://user?id={OWNER_ID}"}],
+                    [{"text":"👨‍💻 بەرنامەنووس","url":f"tg://user?id={OWNER_ID}"}],
                 ]}
-
-                if photo_fid:
-                    # ناردنی وێنەی واقعی بە file_id
-                    await c.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
-                        "chat_id":chat_id,
-                        "photo":photo_fid,
-                        "caption":caption,
-                        "parse_mode":"HTML",
-                        "reply_markup":keyboard,
-                        "reply_to_message_id":message_id,
-                    })
-                else:
-                    # بەبێ وێنە — تەنها نامە
-                    await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
-                        "chat_id":chat_id,
-                        "text":caption,
-                        "parse_mode":"HTML",
-                        "reply_markup":keyboard,
-                        "reply_to_message_id":message_id,
-                    })
+                await c.post(f"https://api.telegram.org/bot{token}/sendPhoto", json={
+                    "chat_id":chat_id,"photo":sys_photo,"caption":caption,
+                    "parse_mode":"HTML","reply_markup":keyboard,"reply_to_message_id":message_id,
+                })
             else:
-                # ڕیاکشن — VIP زووتر
-                if vip_user:
-                    await asyncio.sleep(0)   # بەبێ دووکانە
-                else:
-                    await asyncio.sleep(0.3) # کەمێک دواکەوتن بۆ ئاسایی
-
                 emoji = random.choice(EMOJIS)
                 await c.post(f"https://api.telegram.org/bot{token}/setMessageReaction", json={
                     "chat_id":chat_id,"message_id":message_id,
@@ -1932,25 +2015,10 @@ async def process_child_update(token: str, body: dict):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ── هاندلەری وێنە بۆ گۆڕینی وێنەی بەخێرهاتن
-# ══════════════════════════════════════════════════════════════════════════════
-async def handle_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid   = update.effective_user.id
-    state = await db_get(f"users/{uid}/state") or ""
-
-    if state == "change_welcome_photo" and uid == OWNER_ID:
-        photo_id = update.message.photo[-1].file_id
-        await db_put("system/photo_file_id", photo_id)
-        await db_del(f"users/{uid}/state")
-        await update.message.reply_text("‏✅ وێنەی بەخێرهاتن نوێکرا!", reply_markup=KB_SYS)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # ── ڕاوتەرەکان
 # ══════════════════════════════════════════════════════════════════════════════
 master_app = ApplicationBuilder().token(MASTER_TOKEN).build()
 master_app.add_handler(CommandHandler("start", master_start))
-master_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 master_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 
