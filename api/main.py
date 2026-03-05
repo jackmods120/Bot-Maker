@@ -166,13 +166,14 @@ def kb_main_admin(uid: int) -> ReplyKeyboardMarkup:
 # ── کۆنترۆڵی بۆت ─────────────────────────────────────────────────────────
 def kb_control(uid: int) -> ReplyKeyboardMarkup:
     rows = [
-        [KeyboardButton("▶️ دەستپێکردن"),      KeyboardButton("⏸ وەستاندن")],
-        [KeyboardButton("🔄 نوێکردنەوە"),       KeyboardButton("📋 زانیاری بۆت")],
-        [KeyboardButton("✏️ گۆڕینی بەخێرهاتن"), KeyboardButton("📨 پەیام بۆ بەکارهێنەران")],
-        [KeyboardButton("🗑 سڕینەوەی بۆت"),     KeyboardButton("🔙 گەڕانەوە بۆ لیست")],
+        [KeyboardButton("▶️ دەستپێکردن"),           KeyboardButton("⏸ وەستاندن")],
+        [KeyboardButton("🔄 نوێکردنەوە"),            KeyboardButton("📋 زانیاری بۆت")],
+        [KeyboardButton("✏️ گۆڕینی بەخێرهاتن"),    KeyboardButton("📨 پەیام بۆ بەکارهێنەران")],
+        [KeyboardButton("🔔 ئاگادارکردنەوەی /start"), KeyboardButton("🔕 کوژاندنی ئاگادارکردنەوە")],
+        [KeyboardButton("🗑 سڕینەوەی بۆت"),          KeyboardButton("🔙 گەڕانەوە بۆ لیست")],
     ]
     if uid == OWNER_ID:
-        rows.insert(3, [KeyboardButton("🔑 گۆڕینی تۆکێن"), KeyboardButton("🔗 نوێکردنەوەی وەبهووک")])
+        rows.insert(4, [KeyboardButton("🔑 گۆڕینی تۆکێن"), KeyboardButton("🔗 نوێکردنەوەی وەبهووک")])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 # ── پانێلی سەرەکی (Owner) — مینیو ─────────────────────────────────────────
@@ -182,6 +183,14 @@ KB_OWNER_MAIN = ReplyKeyboardMarkup([
     [KeyboardButton("🛡 بەشی ئەمنیەت"),         KeyboardButton("📢 جۆینی ناچاری")],
     [KeyboardButton("⚙️ بەشی سیستەم"),          KeyboardButton("📊 ئامارەکان")],
     [KeyboardButton("👨‍💼 بەشی ئەدمینەکان"),     KeyboardButton("🔔 بەشی ئاگادارکردنەوە")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+], resize_keyboard=True)
+
+# ── پانێلی ئاگادارکردنەوەی سەرەکی (بۆ خاوەن لە kb_main) ─────────────────
+KB_NOTIF_MAIN = ReplyKeyboardMarkup([
+    [KeyboardButton("🔔 چالاككردنی ئاگادارکردنەوەی /start")],
+    [KeyboardButton("🔕 کوژاندنی ئاگادارکردنەوەی /start")],
+    [KeyboardButton("📢 ئاگادارکردنەوەی بۆ بەکارهێنەرانی بۆتی سەرەکی")],
     [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
 ], resize_keyboard=True)
 
@@ -491,6 +500,34 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await handle_control(update, uid, txt)
         return
 
+    # ── ئاگادارکردنەوەی /start بۆ بۆتی دیاریکراو ────────────────────────
+    if txt in ("🔔 ئاگادارکردنەوەی /start", "🔕 کوژاندنی ئاگادارکردنەوە"):
+        R = "\u200f"
+        bid = await db_get(f"users/{uid}/selected_bot")
+        if not bid:
+            await update.message.reply_text(f"{R}❌ پێشەکی بۆتێک هەڵبژێرە.", reply_markup=kb_main(uid))
+            return
+        binfo = await db_get(f"managed_bots/{bid}") or {}
+        enable = (txt == "🔔 ئاگادارکردنەوەی /start")
+        binfo["notif_enabled"] = enable
+        await db_put(f"managed_bots/{bid}", binfo)
+        bun = binfo.get("bot_username", "بۆت")
+        if enable:
+            await update.message.reply_text(
+                f"{R}🔔 <b>ئاگادارکردنەوەی /start چالاک کرا</b>\n\n"
+                f"{R}🤖 بۆت: @{bun}\n"
+                f"{R}📌 ئێستا کاتێک بەکارهێنەرێک یەکەم جار /start کرد ئاگادار دەکرێیتەوە",
+                parse_mode="HTML", reply_markup=kb_control(uid)
+            )
+        else:
+            await update.message.reply_text(
+                f"{R}🔕 <b>ئاگادارکردنەوەی /start کوژێنرایەوە</b>\n\n"
+                f"{R}🤖 بۆت: @{bun}\n"
+                f"{R}📌 ئاگادارکردنەوە بۆ ئەم بۆتە کوژێنرایەوە",
+                parse_mode="HTML", reply_markup=kb_control(uid)
+            )
+        return
+
     # ── ئامار ─────────────────────────────────────────────────────────────
     if txt in ("📊 ئامارەکان","📊 ئامارەکانم"):
         await show_stats(update, uid)
@@ -795,14 +832,59 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # ════ بەشی ئاگادارکردنەوە ═════════════════════════════════════════
         if txt == "🔔 بەشی ئاگادارکردنەوە":
             R = "\u200f"
-            notif_users = await db_get("system/notif_users_enabled") or True
-            notif_main  = await db_get("system/notif_main_enabled")  or True
+            # ئامارەکانی ئاگادارکردنەوە بۆ هەموو بۆتەکانی ئەم بەکارهێنەرە
+            all_b = await db_get("managed_bots") or {}
+            mine  = {k:v for k,v in all_b.items() if v.get("owner") == uid}
+            enabled_count  = sum(1 for v in mine.values() if v.get("notif_enabled", True))
+            disabled_count = len(mine) - enabled_count
             await update.message.reply_text(
-                f"{R}🔔 <b>بەشی ئاگادارکردنەوە</b>\n\n"
-                f"{R}👥 ئاگادارکردنەوەی بەکارهێنەران: <b>{'✅ چالاک' if notif_users else '❌ لەکارخراو'}</b>\n"
-                f"{R}📢 ئاگادارکردنەوەی بۆتی سەرەکی: <b>{'✅ چالاک' if notif_main else '❌ لەکارخراو'}</b>\n\n"
+                f"{R}🔔 <b>بەشی ئاگادارکردنەوە</b>\n"
+                f"{R}━━━━━━━━━━━━━━━━━━━\n"
+                f"{R}🤖 بۆتەکانت: <b>{len(mine)}</b>\n"
+                f"{R}✅ ئاگادارکردنەوەی چالاک: <b>{enabled_count}</b>\n"
+                f"{R}❌ ئاگادارکردنەوەی کوژاو: <b>{disabled_count}</b>\n"
+                f"{R}━━━━━━━━━━━━━━━━━━━\n"
                 f"{R}👇 هەڵبژێرە:",
-                parse_mode="HTML", reply_markup=KB_NOTIF
+                parse_mode="HTML", reply_markup=KB_NOTIF_MAIN
+            )
+            return
+        if txt == "🔔 چالاككردنی ئاگادارکردنەوەی /start":
+            R = "\u200f"
+            all_b = await db_get("managed_bots") or {}
+            mine  = {k:v for k,v in all_b.items() if v.get("owner") == uid}
+            for bid_k, binfo in mine.items():
+                binfo["notif_enabled"] = True
+                await db_put(f"managed_bots/{bid_k}", binfo)
+            await update.message.reply_text(
+                f"{R}🔔 <b>ئاگادارکردنەوەی /start چالاک کرا</b>\n\n"
+                f"{R}📌 ئێستا کاتێک بەکارهێنەرێک یەکەم جار /start کرد\n"
+                f"{R}   نامەی ئاگادارکردنەوە دەگرێیت 🔔",
+                parse_mode="HTML", reply_markup=KB_NOTIF_MAIN
+            )
+            return
+        if txt == "🔕 کوژاندنی ئاگادارکردنەوەی /start":
+            R = "\u200f"
+            all_b = await db_get("managed_bots") or {}
+            mine  = {k:v for k,v in all_b.items() if v.get("owner") == uid}
+            for bid_k, binfo in mine.items():
+                binfo["notif_enabled"] = False
+                await db_put(f"managed_bots/{bid_k}", binfo)
+            await update.message.reply_text(
+                f"{R}🔕 <b>ئاگادارکردنەوەی /start کوژێنرایەوە</b>\n\n"
+                f"{R}📌 ئێستا کاتێک بەکارهێنەرێک /start کرد\n"
+                f"{R}   ئاگادار ناکرێیتەوە",
+                parse_mode="HTML", reply_markup=KB_NOTIF_MAIN
+            )
+            return
+        if txt == "📢 ئاگادارکردنەوەی بۆ بەکارهێنەرانی بۆتی سەرەکی":
+            await db_put(f"users/{uid}/state", "notif_master")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            R = "\u200f"
+            await update.message.reply_text(
+                f"{R}📢 <b>ئاگادارکردنەوەی بۆتی سەرەکی</b>\n\n"
+                f"{R}📨 ئەم نامەیە دەچێت بۆ هەموو بەکارهێنەرانی بۆتی دروستکەری بۆت\n\n"
+                f"{R}⬇️ نامەکەت بنووسە:",
+                parse_mode="HTML", reply_markup=kb
             )
             return
         if txt == "🔔 ئاگادارکردنەوەی بەکارهێنەران":
@@ -812,17 +894,6 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"{R}🔔 <b>ئاگادارکردنەوەی بەکارهێنەران</b>\n\n"
                 f"{R}📨 ئەم نامەیە دەچێت بۆ هەموو بەکارهێنەرانی بۆتەکەت\n\n"
-                f"{R}⬇️ نامەکەت بنووسە:",
-                parse_mode="HTML", reply_markup=kb
-            )
-            return
-        if txt == "📢 ئاگادارکردنەوەی بۆتی سەرەکی":
-            await db_put(f"users/{uid}/state", "notif_master")
-            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            R = "\u200f"
-            await update.message.reply_text(
-                f"{R}📢 <b>ئاگادارکردنەوەی بۆتی سەرەکی</b>\n\n"
-                f"{R}📨 ئەم نامەیە دەچێت بۆ هەموو بەکارهێنەرانی بۆتی سەرەکی (دروستکەرانی بۆت)\n\n"
                 f"{R}⬇️ نامەکەت بنووسە:",
                 parse_mode="HTML", reply_markup=kb
             )
@@ -900,17 +971,19 @@ async def show_owner_main(update: Update):
     run    = sum(1 for v in all_b.values() if v.get("status") == "running")
     notif_on = await db_get("system/notifications_enabled")
     fj       = await db_get("system/force_join") or False
+    R = "\u200f"
     msg = (
-        "‏‼️ <b>پانێلی سەرەکی</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"‏👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
-        f"‏🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
-        f"‏💎 VIPەکان:        <b>{len(all_v)}</b>\n"
-        f"‏🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
-        f"‏👨‍💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
-        f"‏🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
-        f"‏📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "‏📌 بەشێک هەڵبژێرە:"
+        f"{R}‼️ <b>پانێلی سەرەکی</b>\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{R}👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
+        f"{R}🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
+        f"{R}💎 VIPەکان:        <b>{len(all_v)}</b>\n"
+        f"{R}🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
+        f"{R}👨‍\u200d💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
+        f"{R}🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
+        f"{R}📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"{R}📌 بەشێک هەڵبژێرە:"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
 
@@ -969,20 +1042,21 @@ async def show_stats(update: Update, uid: int):
     all_u = await db_get("users")         or {}
     mine  = {k: v for k, v in all_b.items() if v.get("owner") == uid}
     run_m = sum(1 for v in mine.values() if v.get("status") == "running")
+    R = "\u200f"
     if uid == OWNER_ID:
         run_a = sum(1 for v in all_b.values() if v.get("status") == "running")
         all_v = await db_get("vip") or {}
         admins = await db_get("admins") or {}
         txt   = (
-            "‏📊 <b>ئامارەکانی سیستەم</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"👥 هەموو بەکارهێنەران: <b>{len(all_u)}</b>\n"
-            f"🤖 هەموو بۆتەکان:      <b>{len(all_b)}</b>\n"
-            f"🟢 چالاک: <b>{run_a}</b>  🔴 ڕاگیراو: <b>{len(all_b)-run_a}</b>\n"
-            f"💎 VIPەکان: <b>{len(all_v)}</b>\n"
-            f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"📁 بۆتەکانی خۆت: <b>{len(mine)}</b>  (🟢{run_m})"
+            f"{R}📊 <b>ئامارەکانی سیستەم</b>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}👥 هەموو بەکارهێنەران: <b>{len(all_u)}</b>\n"
+            f"{R}🤖 هەموو بۆتەکان:      <b>{len(all_b)}</b>\n"
+            f"{R}🟢 چالاک: <b>{run_a}</b>  🔴 ڕاگیراو: <b>{len(all_b)-run_a}</b>\n"
+            f"{R}💎 VIPەکان: <b>{len(all_v)}</b>\n"
+            f"{R}👨\u200d💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}📁 بۆتەکانی خۆت: <b>{len(mine)}</b>  (🟢{run_m})"
         )
     else:
         bu_count = 0
@@ -991,12 +1065,12 @@ async def show_stats(update: Update, uid: int):
             bu_count += len(bu)
         vip_badge = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
         txt = (
-            "‏📊 <b>ئامارەکانت</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n"
-            f"🎖 دۆخ: <b>{vip_badge}</b>\n"
-            f"🤖 بۆتی دروستکردوو: <b>{len(mine)}</b>\n"
-            f"🟢 چالاک: <b>{run_m}</b>  🔴 ڕاگیراو: <b>{len(mine)-run_m}</b>\n"
-            f"👥 کۆی بەکارهێنەرانی بۆتەکانت: <b>{bu_count}</b>"
+            f"{R}📊 <b>ئامارەکانت</b>\n"
+            f"{R}━━━━━━━━━━━━━━━━━━━\n"
+            f"{R}🎖 دۆخ: <b>{vip_badge}</b>\n"
+            f"{R}🤖 بۆتی دروستکردوو: <b>{len(mine)}</b>\n"
+            f"{R}🟢 چالاک: <b>{run_m}</b>  🔴 ڕاگیراو: <b>{len(mine)-run_m}</b>\n"
+            f"{R}👥 کۆی بەکارهێنەرانی بۆتەکانت: <b>{bu_count}</b>"
         )
     await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
 
@@ -1748,7 +1822,7 @@ async def owner_list_channels(update: Update):
     req_chs = await db_get("system/req_channels") or {}
     fj      = await db_get("system/force_join") or False
     msg     = (
-        "📢 <b>زانیاری جۆینی ناچاری</b>\n"
+        f"‏📢 <b>زانیاری جۆینی ناچاری</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         f"📢 کانالی سەرەکی بۆتەکان: @{main_ch}\n"
         f"🔔 دۆخی جۆینی ناچاری: <b>{'✅ چالاک' if fj else '❌ لەکارخراو'}</b>\n\n"
@@ -1768,7 +1842,7 @@ async def owner_channel_stats(update: Update):
     fj      = await db_get("system/force_join")   or False
     all_u   = await db_get("users") or {}
     msg     = (
-        "📊 <b>ئامارەکانی جۆینی ناچاری</b>\n"
+        f"‏📊 <b>ئامارەکانی جۆینی ناچاری</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         f"🔔 دۆخ: <b>{'✅ چالاک' if fj else '❌ لەکارخراو'}</b>\n"
         f"📋 کانالە داواکراوەکان: <b>{len(req_chs)}</b>\n"
@@ -1784,7 +1858,7 @@ async def owner_list_admins(update: Update):
     if not admins:
         await update.message.reply_text("📭 هیچ ئەدمینێک نییە.", reply_markup=KB_ADMINS)
         return
-    lines = [f"👨‍💼 <b>لیستی ئەدمینەکان ({len(admins)}):</b>\n"]
+    lines = [f"‏👨‍💼 <b>لیستی ئەدمینەکان ({len(admins)}):</b>\n"]
     for a_id, ad in list(admins.items())[:40]:
         name = html.escape(ad.get("name","ناسناو"))
         date = ad.get("date","نییە")
@@ -1795,7 +1869,7 @@ async def owner_list_admins(update: Update):
 async def owner_admin_stats(update: Update):
     admins = await db_get("admins") or {}
     msg = (
-        "📊 <b>ئامارەکانی ئەدمینەکان</b>\n"
+        f"‏📊 <b>ئامارەکانی ئەدمینەکان</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
         f"👨‍💼 کۆی ئەدمینەکان: <b>{len(admins)}</b>\n"
         f"👑 خاوەنی سیستەم: <b>1</b> (سەرەکی)"
@@ -1810,7 +1884,7 @@ async def owner_notif_history(update: Update):
         await update.message.reply_text("📭 هیچ مێژووی ئاگادارکردنەوەیەک نییە.", reply_markup=KB_NOTIF)
         return
     if isinstance(hist, dict): hist = list(hist.values())
-    lines = ["📋 <b>مێژووی ئاگادارکردنەوە:</b>\n"]
+    lines = [f"‏📋 <b>مێژووی ئاگادارکردنەوە:</b>\n"]
     for h in hist[:15]:
         tp   = h.get("type","—")
         sent = h.get("sent",0)
@@ -1847,7 +1921,7 @@ async def owner_sys_info(update: Update):
     am     = await db_get("system/alert_mode")  or False
     notif  = await db_get("system/notifications_enabled") or False
     msg    = (
-        f"⚙️ <b>زانیاری سیستەم</b>\n"
+        f"‏⚙️ <b>زانیاری سیستەم</b>\n"
         f"━━━━━━━━━━━━━━━━━━━\n"
         f"🌐 PROJECT URL: <code>{purl}</code>\n"
         f"👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
@@ -1909,7 +1983,7 @@ async def owner_show_logs(update: Update):
         await update.message.reply_text("📭 هیچ لۆگێک نییە.", reply_markup=KB_SYS)
         return
     if isinstance(logs, dict): logs = list(logs.values())
-    lines = ["📋 <b>دوایین لۆگەکان:</b>\n"]
+    lines = [f"‏📋 <b>دوایین لۆگەکان:</b>\n"]
     for log in logs[:15]:
         lines.append(f"• {log}")
     await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_SYS)
@@ -1921,7 +1995,7 @@ async def owner_broadcast_history(update: Update):
         await update.message.reply_text("📭 هیچ مێژووی بڵاوکردنەوە نییە.", reply_markup=KB_MSG)
         return
     if isinstance(hist, dict): hist = list(hist.values())
-    lines = ["📜 <b>مێژووی بڵاوکردنەوە:</b>\n"]
+    lines = [f"‏📜 <b>مێژووی بڵاوکردنەوە:</b>\n"]
     for h in hist[:15]:
         tp   = h.get("type","—")
         sent = h.get("sent",0)
