@@ -106,11 +106,27 @@ def now_str() -> str:
 
 
 async def send_and_track(update: Update, uid: int, *args, **kwargs):
-    """نامەی بەخێرهاتن دەنێرێت و ID ی پاشەکەوت دەکات بۆ سڕینەوە"""
+    """نامەی بۆت دەنێرێت و ID ی لە لیستدا پاشەکەوت دەکات بۆ سڕینەوەی دانە دانە"""
     sent = await update.message.reply_text(*args, **kwargs)
-    await db_put(f"users/{uid}/start_msg_id", sent.message_id)
-    await db_put(f"users/{uid}/start_chat_id", update.message.chat_id)
+    # زیادکردن بۆ لیستی نامەکانی بۆت
+    bot_msgs = await db_get(f"users/{uid}/bot_msg_ids") or []
+    if isinstance(bot_msgs, dict): bot_msgs = []
+    bot_msgs.append({"msg_id": sent.message_id, "chat_id": update.message.chat_id})
+    await db_put(f"users/{uid}/bot_msg_ids", bot_msgs[-50:])  # تەنها دوایین ٥٠ پاشەکەوت بکە
     return sent
+
+
+async def delete_all_bot_msgs(ctx, uid: int):
+    """سڕینەوەی هەموو نامەکانی بۆت کە پاشەکەوت کراون"""
+    bot_msgs = await db_get(f"users/{uid}/bot_msg_ids") or []
+    if isinstance(bot_msgs, dict): bot_msgs = []
+    if not bot_msgs:
+        return
+    for item in bot_msgs:
+        try:
+            await ctx.bot.delete_message(chat_id=int(item["chat_id"]), message_id=int(item["msg_id"]))
+        except: pass
+    await db_del(f"users/{uid}/bot_msg_ids")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ── پشکنینی جۆینی ناچاری کەناڵ
@@ -191,7 +207,18 @@ KB_OWNER_MAIN = ReplyKeyboardMarkup([
     [KeyboardButton("🛡 بەشی ئەمنیەت"),         KeyboardButton("📢 جۆینی ناچاری")],
     [KeyboardButton("⚙️ بەشی سیستەم"),          KeyboardButton("📊 ئامارەکان")],
     [KeyboardButton("👨‍💼 بەشی ئەدمینەکان"),     KeyboardButton("🔔 بەشی ئاگادارکردنەوە")],
+    [KeyboardButton("🌐 جۆینی ناچاری بۆتەکان")],
     [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
+], resize_keyboard=True)
+
+# ── جۆینی ناچاری بۆ بۆتی بەکارهێنەران ───────────────────────────────────
+KB_CHILD_FJ = ReplyKeyboardMarkup([
+    [KeyboardButton("➕ زیادکردنی کانال بۆ هەموو بۆتەکان")],
+    [KeyboardButton("➖ لابردنی کانال لە هەموو بۆتەکان")],
+    [KeyboardButton("📋 لیستی کانالەکانی جۆینی ناچاری")],
+    [KeyboardButton("🔔 چالاككردنی جۆینی ناچاری بۆ هەموو")],
+    [KeyboardButton("🔕 کوژاندنی جۆینی ناچاری بۆ هەموو")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
 # ── پانێلی ئاگادارکردنەوەی سەرەکی (بۆ خاوەن لە kb_main) ─────────────────
@@ -382,15 +409,8 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 دەستت لە بۆتەکە گرتراوە.")
         return
 
-    # ── سڕینەوەی ئۆتۆماتیکی تەنها نامەی بەخێرهاتن (/start) ─────────────
-    start_msg_id  = await db_get(f"users/{uid}/start_msg_id")
-    start_chat_id = await db_get(f"users/{uid}/start_chat_id")
-    if start_msg_id and start_chat_id:
-        try:
-            await ctx.bot.delete_message(chat_id=int(start_chat_id), message_id=int(start_msg_id))
-        except: pass
-        await db_del(f"users/{uid}/start_msg_id")
-        await db_del(f"users/{uid}/start_chat_id")
+    # ── سڕینەوەی هەموو نامەکانی بۆت (دانە دانە) ─────────────────────────
+    await delete_all_bot_msgs(ctx, uid)
     if txt == "🔄 پشکنینی دووبارە":
         if uid != OWNER_ID and not await is_admin(uid):
             joined, not_joined = await check_force_join(uid)
@@ -1042,6 +1062,64 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🖼 لینکی وێنەی نوێ بنووسە:", reply_markup=kb)
             return
 
+        # ════ جۆینی ناچاری بۆ بۆتی بەکارهێنەران ════════════════════════════
+        if txt == "🌐 جۆینی ناچاری بۆتەکان":
+            R = "\u200f"
+            all_b = await db_get("managed_bots") or {}
+            chs   = await db_get("system/child_fj_channels") or {}
+            fj_on = await db_get("system/child_fj_enabled") or False
+            await send_and_track(update, uid,
+                f"{R}🌐 <b>جۆینی ناچاری بۆ بۆتی بەکارهێنەران</b>\n"
+                f"{R}━━━━━━━━━━━━━━━━━━━\n"
+                f"{R}🤖 کۆی بۆتەکان: <b>{len(all_b)}</b>\n"
+                f"{R}📢 کانالەکان: <b>{len(chs)}</b>\n"
+                f"{R}{'✅ چالاک' if fj_on else '❌ لەکارخراو'}\n"
+                f"{R}━━━━━━━━━━━━━━━━━━━\n"
+                f"{R}👇 هەڵبژێرە:",
+                parse_mode="HTML", reply_markup=KB_CHILD_FJ
+            )
+            return
+        if txt == "➕ زیادکردنی کانال بۆ هەموو بۆتەکان":
+            await db_put(f"users/{uid}/state", "child_fj_add_ch")
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            await update.message.reply_text(
+                "📢 یوزەرنەیمی کانالەکە بنووسە (بەبێ @):\nنموونە: <code>my_channel</code>",
+                parse_mode="HTML", reply_markup=kb
+            )
+            return
+        if txt == "➖ لابردنی کانال لە هەموو بۆتەکان":
+            await db_put(f"users/{uid}/state", "child_fj_del_ch")
+            chs = await db_get("system/child_fj_channels") or {}
+            if not chs:
+                await update.message.reply_text("📭 هیچ کانالێک زیادنەکراوە.", reply_markup=KB_CHILD_FJ)
+                return
+            kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
+            lines = "\n".join([f"• @{c}" for c in chs.keys()])
+            await update.message.reply_text(f"📋 کانالەکان:\n{lines}\n\nیوزەرنەیمی کانالەکە بنووسە (بەبێ @):", reply_markup=kb)
+            return
+        if txt == "📋 لیستی کانالەکانی جۆینی ناچاری":
+            R = "\u200f"
+            chs = await db_get("system/child_fj_channels") or {}
+            fj_on = await db_get("system/child_fj_enabled") or False
+            if not chs:
+                await update.message.reply_text(f"{R}📭 هیچ کانالێک زیادنەکراوە.", reply_markup=KB_CHILD_FJ)
+                return
+            lines = [f"{R}📋 <b>کانالەکانی جۆینی ناچاری:</b> ({'✅ چالاک' if fj_on else '❌ کوژاو'})\n"]
+            for c in chs.keys():
+                lines.append(f"• @{c}")
+            await update.message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=KB_CHILD_FJ)
+            return
+        if txt == "🔔 چالاككردنی جۆینی ناچاری بۆ هەموو":
+            await db_put("system/child_fj_enabled", True)
+            R = "\u200f"
+            await update.message.reply_text(f"{R}✅ <b>جۆینی ناچاری چالاک کرا بۆ هەموو بۆتەکان</b>", parse_mode="HTML", reply_markup=KB_CHILD_FJ)
+            return
+        if txt == "🔕 کوژاندنی جۆینی ناچاری بۆ هەموو":
+            await db_put("system/child_fj_enabled", False)
+            R = "\u200f"
+            await update.message.reply_text(f"{R}🔕 <b>جۆینی ناچاری کوژێنرایەوە بۆ هەموو بۆتەکان</b>", parse_mode="HTML", reply_markup=KB_CHILD_FJ)
+            return
+
     # ════════════════════════════════════════════════════════════════════════
     # دۆخەکانی چاوەڕوانی
     # ════════════════════════════════════════════════════════════════════════
@@ -1051,7 +1129,8 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════════════════════════════
 # ── نیشاندانی Owner Main
 # ══════════════════════════════════════════════════════════════════════════════
-async def show_owner_main(update: Update):
+async def show_owner_main(update: Update, uid: int = None):
+    uid = uid or update.effective_user.id
     all_b  = await db_get("managed_bots") or {}
     all_u  = await db_get("users")         or {}
     all_v  = await db_get("vip")           or {}
@@ -1074,7 +1153,7 @@ async def show_owner_main(update: Update):
         f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{R}📌 بەشێک هەڵبژێرە:"
     )
-    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
+    await send_and_track(update, uid, msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1084,7 +1163,7 @@ async def show_bot_list(update: Update, uid: int):
     all_b = await db_get("managed_bots") or {}
     mine  = {k: v for k, v in all_b.items() if v.get("owner") == uid}
     if not mine:
-        await update.message.reply_text(
+        await send_and_track(update, uid,
             "📭 <b>هیچ بۆتێکت دروست نەکردووە!</b>\n\nکلیک لە '➕ دروستکردنی بۆتی نوێ' بکە.",
             parse_mode="HTML", reply_markup=kb_main(uid),
         )
@@ -1094,7 +1173,7 @@ async def show_bot_list(update: Update, uid: int):
         st = "🟢" if info.get("status") == "running" else "🔴"
         rows.append([KeyboardButton(f"{st} @{info.get('bot_username','Bot')}")])
     rows.append([KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")])
-    await update.message.reply_text(
+    await send_and_track(update, uid,
         f"‏📂 <b>بۆتەکانت ({len(mine)}):</b>\n‏🟢 کاردەکات  |  🔴 ڕاگیراوە",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(rows, resize_keyboard=True),
@@ -1127,7 +1206,7 @@ async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
         f"{R}🔔 <b>ئاگادارکردنەوە:</b> {'✅ چالاک' if notif_on else '❌ کوێژاو'}\n"
         f"{R}━━━━━━━━━━━━━━━━━━━"
     )
-    await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb_control(uid))
+    await send_and_track(update, uid, msg, parse_mode="HTML", reply_markup=kb_control(uid))
 
 
 async def show_stats(update: Update, uid: int):
@@ -1165,7 +1244,7 @@ async def show_stats(update: Update, uid: int):
             f"{R}🟢 چالاک: <b>{run_m}</b>  🔴 ڕاگیراو: <b>{len(mine)-run_m}</b>\n"
             f"{R}👥 کۆی بەکارهێنەرانی بۆتەکانت: <b>{bu_count}</b>"
         )
-    await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
+    await send_and_track(update, uid, txt, parse_mode="HTML", reply_markup=kb_main(uid))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1451,19 +1530,25 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         delay = 0.02 if vip_user else 0.05
         sm = await update.message.reply_text(f"{R}⏳ خەریکی ناردنم، تکایە چاوەڕێ بە...")
         total_sent = total_fail = total_bots = 0
-        seen_users: set = set()
+        seen_chats: set = set()
         for bid_k, binfo in all_b.items():
             token_k = binfo.get("token","")
             if not token_k: continue
             bu = await db_get(f"bot_users/{bid_k}") or {}
             if not bu: continue
             total_bots += 1
-            for u_id in bu.keys():
-                if u_id in seen_users:
+            for u_id, udata in bu.items():
+                # chat_id پاشەکەوتکراوە لە bot_users، بەکاربهێنە
+                if isinstance(udata, dict):
+                    cid = udata.get("chat_id", int(u_id))
+                else:
+                    cid = int(u_id)
+                cid_key = f"{bid_k}:{cid}"
+                if cid_key in seen_chats:
                     continue
-                seen_users.add(u_id)
+                seen_chats.add(cid_key)
                 try:
-                    r = await send_tg(token_k, "sendMessage", {"chat_id": int(u_id), "text": txt, "parse_mode": "HTML"})
+                    r = await send_tg(token_k, "sendMessage", {"chat_id": int(cid), "text": txt, "parse_mode": "HTML"})
                     if r.get("ok"): total_sent += 1
                     else: total_fail += 1
                 except: total_fail += 1
@@ -1472,8 +1557,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         await sm.edit_text(
             f"{R}✅ <b>تەواو!</b>\n"
             f"{R}━━━━━━━━━━━━━━━━━━━\n"
-            f"{R}🤖 بۆتە کارکراوەکان: <b>{total_bots}</b>\n"
-            f"{R}👥 کۆی بەکارهێنەران: <b>{len(seen_users)}</b>\n"
+            f"{R}🤖 بۆتەکان: <b>{total_bots}</b>\n"
             f"{R}📤 نێردرا: <b>{total_sent}</b>\n"
             f"{R}❌ شکستهێنا: <b>{total_fail}</b>",
             parse_mode="HTML"
@@ -1711,6 +1795,32 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             await update.message.reply_text("❌ بۆتێک بەم ID ەیە نەدۆزرایەوە.", reply_markup=KB_BOTS)
         else:
             await do_delete_bot(update, uid, txt.strip(), back_kb=KB_BOTS)
+        return
+
+    # ── جۆینی ناچاری بۆ بۆتی بەکارهێنەران ──────────────────────────────
+    if state == "child_fj_add_ch" and uid == OWNER_ID:
+        ch = txt.strip().lstrip("@")
+        if not ch:
+            await update.message.reply_text("⚠️ یوزەرنەیمی دروست بنووسە.")
+            return
+        await db_put(f"system/child_fj_channels/{ch}", True)
+        await db_del(f"users/{uid}/state")
+        R = "\u200f"
+        await update.message.reply_text(
+            f"{R}✅ کانالی @{ch} زیادکرا بۆ جۆینی ناچاری هەموو بۆتەکان",
+            reply_markup=KB_CHILD_FJ
+        )
+        return
+
+    if state == "child_fj_del_ch" and uid == OWNER_ID:
+        ch = txt.strip().lstrip("@")
+        await db_del(f"system/child_fj_channels/{ch}")
+        await db_del(f"users/{uid}/state")
+        R = "\u200f"
+        await update.message.reply_text(
+            f"{R}✅ کانالی @{ch} لابرا لە جۆینی ناچاری",
+            reply_markup=KB_CHILD_FJ
+        )
         return
 
     # ── ئەدمین ────────────────────────────────────────────────────────────
@@ -2295,10 +2405,18 @@ async def process_child_update(token: str, body: dict):
         bnm  = info.get("bot_name","Reaction Bot")
         wlcm = info.get("welcome_msg","")
 
-        sys_photo = await db_get("system/photo_url") or PHOTO_URL
-        sys_chan  = await db_get("system/channel")   or CHANNEL_USER
-        req_chs   = await db_get("system/req_channels") or {}
-        fj        = await db_get("system/force_join") or False
+        sys_photo   = await db_get("system/photo_url") or PHOTO_URL
+        sys_chan    = await db_get("system/channel")   or CHANNEL_USER
+        req_chs     = await db_get("system/req_channels") or {}
+        fj          = await db_get("system/force_join") or False
+        # جۆینی ناچاری تایبەت بۆ هەموو بۆتەکان (لە پانێلی سەرەکی)
+        child_fj_on = await db_get("system/child_fj_enabled") or False
+        child_fj_chs= await db_get("system/child_fj_channels") or {}
+        # یەکگرتنەوەی هەر دوو لیست
+        if child_fj_on and child_fj_chs:
+            fj = True
+            for ch in child_fj_chs:
+                req_chs[ch] = True
 
         msg = body.get("message") or body.get("channel_post")
         if not msg: return
