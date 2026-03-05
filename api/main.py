@@ -1,7 +1,7 @@
 import os, logging, httpx, asyncio, random, html, re
 from fastapi import FastAPI, Request
-from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update, Bot, ReplyKeyboardMarkup, KeyboardButton, ReactionTypeEmoji
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 
 # ── CONFIGURATION ─────────────────────────────────────────────────────────────
@@ -20,7 +20,17 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# ── DATABASE HELPERS (FIREBASE) ───────────────────────────────────────────────
+# ── KEYBOARDS (کیبۆردەکانی خوارەوەی شاشە) ────────────────────────────────────
+MAIN_MENU = ReplyKeyboardMarkup(
+    [[KeyboardButton("➕ دروستکردنی بۆتی نوێ"), KeyboardButton("📂 بۆتەکانم")]], 
+    resize_keyboard=True
+)
+
+CONTROL_PANEL = ReplyKeyboardMarkup([[KeyboardButton("▶️ دەستپێکردن"), KeyboardButton("⏸ وەستاندن")],[KeyboardButton("🔄 نوێکردنەوە"), KeyboardButton("🗑 سڕینەوە")],
+    [KeyboardButton("🔙 گەڕانەوە بۆ لیست")]
+], resize_keyboard=True)
+
+# ── DATABASE HELPERS ──────────────────────────────────────────────────────────
 def fb_url(path): return f"{DB_URL}/{path}.json?auth={DB_SECRET}"
 
 async def db_get(path):
@@ -44,179 +54,158 @@ async def db_del(path):
         except: pass
 
 # ==============================================================================
-# ── 1. MASTER BOT (پانێڵی دروستکردن و کۆنترۆڵ)
+# ── 1. MASTER BOT (بۆتە سەرەکییەکە)
 # ==============================================================================
 async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     msg = (
         "👋 <b>بەخێربێیت بۆ پانێڵی دروستکردنی بۆت!</b>\n\n"
         "لێرە دەتوانیت بۆتی تایبەت بە خۆت دروست بکەیت و کۆنترۆڵیان بکەیت.\n"
-        "تکایە لە دوگمەکانی خوارەوە هەڵبژێرە:"
+        "تکایە لە کیبۆردی خوارەوە هەڵبژێرە:"
     )
-    kb = [[InlineKeyboardButton("➕ دروستکردنی بۆتی نوێ", callback_data="create_bot")],[InlineKeyboardButton("📂 بۆتەکانم (کۆنترۆڵ)", callback_data="my_bots")]
-    ]
-    if update.message:
-        await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-    else:
-        await update.callback_query.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
+    await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=MAIN_MENU)
 
-async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    data = q.data
-    user_id = q.from_user.id
-    try: await q.answer()
-    except: pass
+async def handle_text_commands(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    user_id = update.effective_user.id
 
-    # --- گەڕانەوە بۆ سەرەتا ---
-    if data == "main_menu":
+    # 1. دروستکردنی بۆت
+    if text == "➕ دروستکردنی بۆتی نوێ":
+        msg = (
+            "🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
+            "تکایە تەنها تۆکێنی بۆتەکەت (Bot Token) لێرە بنێرە کە لە @BotFather وەرتگرتووە:"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return
+
+    # 2. لیستی بۆتەکانم
+    if text == "📂 بۆتەکانم" or text == "🔙 گەڕانەوە بۆ لیست":
+        all_bots = await db_get("managed_bots") or {}
+        user_bots = {k: v for k, v in all_bots.items() if v.get("owner") == user_id}
+
+        if not user_bots:
+            await update.message.reply_text("📭 هیچ بۆتێکت دروست نەکردووە!", reply_markup=MAIN_MENU)
+            return
+
+        # دروستکردنی کیبۆردی خوارەوە بۆ لیستی بۆتەکان
+        bot_buttons =[]
+        for b_id, info in user_bots.items():
+            username = info.get("bot_username", "Bot")
+            bot_buttons.append([KeyboardButton(f"🤖 @{username}")])
+        
+        bot_buttons.append([KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")])
+        bot_list_kb = ReplyKeyboardMarkup(bot_buttons, resize_keyboard=True)
+        
+        await update.message.reply_text("📂 <b>بۆتەکانت:</b>\nکام بۆتە دەتەوێت کۆنترۆڵ بکەیت؟", parse_mode=ParseMode.HTML, reply_markup=bot_list_kb)
+        return
+
+    # 3. گەڕانەوە بۆ سەرەتا
+    if text == "🔙 گەڕانەوە بۆ سەرەتا":
         await master_start(update, ctx)
         return
 
-    # --- مینیوی دروستکردن ---
-    if data == "create_bot":
-        msg = "🤖 <b>جۆری ئەو بۆتە هەڵبژێرە کە دەتەوێت دروستی بکەیت:</b>"
-        kb = [[InlineKeyboardButton("🍓 بۆتی ڕیاکشن (Reaction Bot)", callback_data="type_reaction")],[InlineKeyboardButton("🔜 جۆری تر (بەمزوانە)", callback_data="coming_soon")],[InlineKeyboardButton("🔙 گەڕانەوە", callback_data="main_menu")]
-        ]
-        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    # --- دوای هەڵبژاردنی بۆتی ڕیاکشن ---
-    if data == "type_reaction":
-        msg = (
-            "🍓 <b>دروستکردنی بۆتی ڕیاکشن</b>\n\n"
-            "ئەم بۆتە وەڵامی /start دەداتەوە و ڕیاکشن بۆ هەموو نامەیەک دەکات.\n\n"
-            "👇 <b>تکایە تەنها تۆکێنی بۆتەکەت (Bot Token) لێرە بنێرە:</b>"
-        )
-        kb = [[InlineKeyboardButton("🔙 گەڕانەوە", callback_data="create_bot")]]
-        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    if data == "coming_soon":
-        await q.answer("⏳ لە داهاتوودا بەردەست دەبێت!", show_alert=True)
-        return
-
-    # --- لیستی بۆتەکانم ---
-    if data == "my_bots":
+    # 4. هەڵبژاردنی بۆتێک لە لیستەکە (نموونە: 🤖 @botname)
+    if text.startswith("🤖 @"):
+        selected_username = text.replace("🤖 @", "").strip()
         all_bots = await db_get("managed_bots") or {}
-        # هێنانی تەنیا ئەو بۆتانەی کە خاوەنەکەی ئەم کەسەیە
-        user_bots = {bot_id: info for bot_id, info in all_bots.items() if info.get("owner") == user_id}
-
-        if not user_bots:
-            msg = "📭 <b>هیچ بۆتێکت دروست نەکردووە!</b>"
-            kb = [[InlineKeyboardButton("🔙 گەڕانەوە", callback_data="main_menu")]]
-            await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-            return
-
-        msg = "📂 <b>بۆتەکانت:</b>\n\nتکایە کلیک لەو بۆتە بکە کە دەتەوێت کۆنترۆڵی بکەیت:"
-        kb =[]
-        for bot_id, info in user_bots.items():
-            username = info.get("bot_username", "UnknownBot")
-            status_icon = "🟢" if info.get("status") == "running" else "🔴"
-            kb.append([InlineKeyboardButton(f"{status_icon} @{username}", callback_data=f"manage_{bot_id}")])
         
-        kb.append([InlineKeyboardButton("🔙 گەڕانەوە", callback_data="main_menu")])
-        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    # --- پانێڵی کۆنترۆڵی بۆتێکی دیاریکراو ---
-    if data.startswith("manage_"):
-        bot_id = data.split("_")[1]
-        bot_data = await db_get(f"managed_bots/{bot_id}")
+        bot_id = None
+        for k, v in all_bots.items():
+            if v.get("owner") == user_id and v.get("bot_username") == selected_username:
+                bot_id = k
+                break
         
-        if not bot_data:
-            await q.answer("❌ ئەم بۆتە نەدۆزرایەوە!", show_alert=True)
-            return
-
-        status = bot_data.get("status", "running")
-        status_text = "🟢 کاردەکات (Running)" if status == "running" else "🔴 ڕاگیراوە (Stopped)"
-        btn_toggle = "⏸ ڕاگرتن" if status == "running" else "▶️ کارپێکردنەوە"
-
-        msg = (
-            f"⚙️ <b>پانێڵی کۆنترۆڵ</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 <b>یوزەر:</b> @{bot_data.get('bot_username')}\n"
-            f"📊 <b>دۆخ:</b> {status_text}\n"
-            f"🔌 <b>جۆر:</b> ڕیاکشن بۆت\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"چیت دەوێت لەگەڵ ئەم بۆتە بکەیت؟"
-        )
-        kb = [[InlineKeyboardButton(btn_toggle, callback_data=f"toggle_{bot_id}")],[InlineKeyboardButton("🗑 سڕینەوەی بۆت", callback_data=f"delete_{bot_id}")],[InlineKeyboardButton("🔙 گەڕانەوە بۆ لیست", callback_data="my_bots")]
-        ]
-        await q.edit_message_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-        return
-
-    # --- ڕاگرتن / کارپێکردنەوە ---
-    if data.startswith("toggle_"):
-        bot_id = data.split("_")[1]
-        bot_data = await db_get(f"managed_bots/{bot_id}")
-        if bot_data:
-            new_status = "stopped" if bot_data.get("status", "running") == "running" else "running"
-            bot_data["status"] = new_status
-            await db_put(f"managed_bots/{bot_id}", bot_data)
+        if bot_id:
+            # خەزنکردنی بۆتە هەڵبژێردراوەکە بۆ ئەم یوزەرە
+            await db_put(f"users/{user_id}/selected_bot", bot_id)
             
-            # گەڕانەوە بۆ لاپەڕەی کۆنترۆڵ بۆ بینینی گۆڕانکارییەکە
-            q.data = f"manage_{bot_id}"
-            await handle_callback(update, ctx)
-        return
-
-    # --- سڕینەوەی بۆت ---
-    if data.startswith("delete_"):
-        bot_id = data.split("_")[1]
-        await db_del(f"managed_bots/{bot_id}")
-        await q.answer("🗑 بۆتەکە بە تەواوی سڕایەوە!", show_alert=True)
-        # گەڕانەوە بۆ لیستی بۆتەکان
-        q.data = "my_bots"
-        await handle_callback(update, ctx)
-        return
-
-# --- وەرگرتنی تۆکێن لەلایەن بەکارهێنەرەوە ---
-async def handle_master_messages(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    user_id = update.effective_user.id
-    
-    # بەکارهێنانی ڕێگێکس بۆ دۆزینەوەی تۆکێن لەناو نامەکە (زۆر پارێزراوە لە Vercel)
-    if not re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", text):
-        # ئەگەر تۆکێن نەبوو، تەنها نامەیەک دەنێرێت کە بچێتە مینیو
-        await update.message.reply_text("تکایە فەرمانی /start بەکاربهێنە بۆ بینینی مینیو، یان تەنها تۆکێن بنێرە.")
-        return
-
-    token = text
-    status_msg = await update.message.reply_text("⏳ خەریکی چالاککردنی بۆتەکەم...")
-    
-    try:
-        # پشکنینی تۆکێن
-        async with Bot(token=token) as bot_user:
-            me = await bot_user.get_me()
-            bot_id_str = str(me.id)
+            status = all_bots[bot_id].get("status", "running")
+            status_text = "🟢 کاردەکات (Running)" if status == "running" else "🔴 ڕاگیراوە (Stopped)"
             
-            # پاککردنەوەی لینکەکە و دانانی وەبەهوک
-            safe_url = PROJECT_URL.rstrip('/')
-            webhook_url = f"{safe_url}/api/bot/{token}"
-            await bot_user.set_webhook(url=webhook_url)
-            
-            # پاشەکەوتکردن لە داتابەیس (status: running) بەشێوەی بنچینە
-            await db_put(f"managed_bots/{bot_id_str}", {
-                "token": token,
-                "owner": user_id,
-                "bot_username": me.username,
-                "type": "reaction",
-                "status": "running"
-            })
-
             msg = (
-                f"✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
-                f"🤖 یوزەر: @{me.username}\n\n"
-                f"ئێستا دەتوانیت لە ڕێگەی دوگمەی <b>'📂 بۆتەکانم'</b> لە فەرمانی /start کۆنترۆڵی بکەیت."
+                f"⚙️ <b>پانێڵی کۆنترۆڵ</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 یوزەر: @{selected_username}\n"
+                f"📊 دۆخ: {status_text}\n"
+                f"━━━━━━━━━━━━━━━━━━━\n"
+                f"لە کیبۆردی خوارەوە کۆنترۆڵی بکە:"
             )
-            kb = [[InlineKeyboardButton("📂 بڕۆ بۆ پانێڵی بۆتەکەم", callback_data=f"manage_{bot_id_str}")]]
-            await status_msg.edit_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
-    
-    except Exception as e:
-        await status_msg.edit_text(f"❌ هەڵە لە تۆکێنەکە یان چالاککردن: {str(e)}")
+            await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=CONTROL_PANEL)
+        else:
+            await update.message.reply_text("❌ ئەم بۆتە نەدۆزرایەوە!")
+        return
+
+    # 5. دوگمەکانی کۆنترۆڵکردن (دەستپێکردن، وەستاندن، نوێکردنەوە، سڕینەوە)
+    if text in["▶️ دەستپێکردن", "⏸ وەستاندن", "🔄 نوێکردنەوە", "🗑 سڕینەوە"]:
+        selected_bot_id = await db_get(f"users/{user_id}/selected_bot")
+        if not selected_bot_id:
+            await update.message.reply_text("⚠️ تکایە سەرەتا بۆتێک لە بەشی '📂 بۆتەکانم' هەڵبژێرە.")
+            return
+
+        bot_data = await db_get(f"managed_bots/{selected_bot_id}")
+        if not bot_data:
+            await update.message.reply_text("❌ بۆتەکە نەدۆزرایەوە یان سڕاوەتەوە.")
+            return
+
+        username = bot_data.get("bot_username", "Bot")
+
+        if text == "▶️ دەستپێکردن":
+            bot_data["status"] = "running"
+            await db_put(f"managed_bots/{selected_bot_id}", bot_data)
+            await update.message.reply_text(f"✅ بۆتی @{username} دەستی پێکرد.", reply_markup=CONTROL_PANEL)
+        
+        elif text == "⏸ وەستاندن":
+            bot_data["status"] = "stopped"
+            await db_put(f"managed_bots/{selected_bot_id}", bot_data)
+            await update.message.reply_text(f"🛑 بۆتی @{username} وەستاندرا.", reply_markup=CONTROL_PANEL)
+
+        elif text == "🔄 نوێکردنەوە":
+            bot_data["status"] = "running"
+            await db_put(f"managed_bots/{selected_bot_id}", bot_data)
+            await update.message.reply_text(f"🔄 بۆتی @{username} نوێکرایەوە و کار دەکات.", reply_markup=CONTROL_PANEL)
+
+        elif text == "🗑 سڕینەوە":
+            await db_del(f"managed_bots/{selected_bot_id}")
+            await db_del(f"users/{user_id}/selected_bot")
+            await update.message.reply_text(f"🗑 بۆتی @{username} بە تەواوی سڕایەوە!", reply_markup=MAIN_MENU)
+        return
+
+    # 6. وەرگرتنی تۆکێن لەلایەن بەکارهێنەرەوە (کاتێک تۆکێن دەنێرێت)
+    if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", text):
+        status_msg = await update.message.reply_text("⏳ خەریکی چالاککردنی بۆتەکەم...", reply_markup=MAIN_MENU)
+        try:
+            async with Bot(token=text) as bot_user:
+                me = await bot_user.get_me()
+                bot_id_str = str(me.id)
+                
+                # دانانی وەبەهوک بۆ بۆتەکە
+                safe_url = PROJECT_URL.rstrip('/')
+                webhook_url = f"{safe_url}/api/bot/{text}"
+                await bot_user.set_webhook(url=webhook_url)
+                
+                # پاشەکەوتکردن لە داتابەیس
+                await db_put(f"managed_bots/{bot_id_str}", {
+                    "token": text,
+                    "owner": user_id,
+                    "bot_username": me.username,
+                    "status": "running"
+                })
+
+                msg = (
+                    f"✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
+                    f"🤖 یوزەر: @{me.username}\n\n"
+                    f"ئێستا لە بەشی <b>'📂 بۆتەکانم'</b> دەتوانیت کۆنترۆڵی بکەیت."
+                )
+                await status_msg.edit_text(msg, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            await status_msg.edit_text(f"❌ هەڵە لە تۆکێنەکە: {str(e)}")
+        return
+
+    # ئەگەر تێکستێکی نەناسراو بوو
+    await update.message.reply_text("تکایە لە دوگمەکانی خوارەوە هەڵبژێرە:", reply_markup=MAIN_MENU)
 
 master_app = ApplicationBuilder().token(MASTER_TOKEN).build()
 master_app.add_handler(CommandHandler("start", master_start))
-master_app.add_handler(CallbackQueryHandler(handle_callback))
-master_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_master_messages))
+master_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_commands))
 
 # ==============================================================================
 # ── 2. CHILD BOT LOGIC (بۆتە دروستکراوەکان)
@@ -225,10 +214,10 @@ async def process_child_update(token: str, body: dict):
     try:
         bot_id_str = token.split(":")[0]
         
-        # ١. پشکنین بزانین ئایا بۆتەکە 'running'ە یان 'stopped'
+        # پشکنین ئایا بۆتەکە کارپێکراوە؟
         bot_data = await db_get(f"managed_bots/{bot_id_str}")
-        if not bot_data: return # بۆتەکە سڕاوەتەوە
-        if bot_data.get("status") != "running": return # بۆتەکە ڕاگیراوە لەلایەن خاوەنەکەیەوە!
+        if not bot_data or bot_data.get("status") != "running":
+            return # بۆتەکە وەستێنراوە یان سڕاوەتەوە
 
         async with Bot(token=token) as bot:
             update = Update.de_json(body, bot)
@@ -247,6 +236,8 @@ async def process_child_update(token: str, body: dict):
 
             # ─── فەرمانی /start ───
             if text.startswith('/start'):
+                # لەبەر ئەوەی دوگمەی بۆتە دروستکراوەکەمان دەوێت وەک Inline بێت (بۆ ئەوەی کلیک بکرێت بچێتە چەناڵ)
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                 keyboard = [[InlineKeyboardButton("My channel ✌", url=f"https://t.me/{CHANNEL_USER}")],[
                         InlineKeyboardButton("ᵃᵈᵈ ᵐᵉ ᵗᵒ ʸᵒᵘʳ ᵍʳᵒᵘᵖ ✨", url=f"https://t.me/{bot_username}?startgroup=new"),
                         InlineKeyboardButton("ᵃᵈᵈ ᵐᵉ ᵗᵒ ʸᵒᵘʳ ᶜʰᵃᶰᶰᵉˡ 🎶", url=f"https://t.me/{bot_username}?startchannel=new")
@@ -255,7 +246,7 @@ async def process_child_update(token: str, body: dict):
                 
                 caption = (
                     f"Hi dear, <a href='tg://user?id={user_id}'>{user_name}</a>\n\n"
-                    f"I'm a reaction bot 🍓, my name is <b>{bot_info.first_name}</b>\n"
+                    f"I'm a reaction bot 🍓, my name is <b>{html.escape(bot_info.first_name)}</b>\n"
                     f"My job is to interact with messages using {' '.join(EMOJIS)}\n"
                     f"I can interact in groups, channels and private chats 🌼\n"
                     f"Just add me to your group or channel and make me an admin with simple permissions ☘️\n"
@@ -295,4 +286,4 @@ async def child_route(request: Request, token: str):
 
 @app.get("/api/main")
 async def health(): 
-    return {"status": "Bot Maker Panel is Active! 🚀"}
+    return {"status": "Bot Maker Panel (Reply Keyboard Edition) is Active! 🚀"}
