@@ -179,7 +179,7 @@ def kb_control(uid: int) -> ReplyKeyboardMarkup:
 KB_OWNER_MAIN = ReplyKeyboardMarkup([
     [KeyboardButton("👥 بەشی بەکارهێنەران"),   KeyboardButton("🤖 بەشی بۆتەکان")],
     [KeyboardButton("📨 بەشی پەیام"),           KeyboardButton("💎 بەشی VIP")],
-    [KeyboardButton("🛡 بەشی ئەمنیەت"),         KeyboardButton("📢 بەشی کانال")],
+    [KeyboardButton("🛡 بەشی ئەمنیەت"),         KeyboardButton("📢 جۆینی ناچاری")],
     [KeyboardButton("⚙️ بەشی سیستەم"),          KeyboardButton("📊 ئامارەکان")],
     [KeyboardButton("👨‍💼 بەشی ئەدمینەکان"),     KeyboardButton("🔔 بەشی ئاگادارکردنەوە")],
     [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
@@ -258,12 +258,13 @@ KB_SEC = ReplyKeyboardMarkup([
     [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
-# ── بەشی کانال ─────────────────────────────────────────────────────────────
+# ── بەشی کانال (جۆینی ناچاری) ─────────────────────────────────────────────
 KB_CHAN = ReplyKeyboardMarkup([
-    [KeyboardButton("📢 گۆڕینی کانالی سەرەکی"),     KeyboardButton("➕ زیادکردنی کانالی داواکراو")],
-    [KeyboardButton("➖ لابردنی کانالی داواکراو"),   KeyboardButton("📋 لیستی کانالەکان")],
-    [KeyboardButton("✅ چالاككردنی داواکردنی کانال"),KeyboardButton("❌ لەکارخستنی داواکردن")],
-    [KeyboardButton("🔍 پشکنینی ئەندامی کانال"),    KeyboardButton("📊 ئامارەکانی کانال")],
+    [KeyboardButton("📢 گۆڕینی کانالی سەرەکی"),      KeyboardButton("🔔 چالاككردنی جۆینی ناچاری")],
+    [KeyboardButton("🔕 لەکارخستنی جۆینی ناچاری"),   KeyboardButton("➕ زیادکردنی کانالی داواکراو")],
+    [KeyboardButton("➖ لابردنی کانالی داواکراو"),    KeyboardButton("📋 لیستی کانالەکان")],
+    [KeyboardButton("🔍 پشکنینی ئەندامی کانال"),     KeyboardButton("📊 ئامارەکانی کانال")],
+    [KeyboardButton("🗑 سڕینەوەی هەموو کانالی داواکراو")],
     [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
@@ -676,20 +677,36 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
 
         # ════ بەشی کانال ══════════════════════════════════════════════════
-        if txt == "📢 بەشی کانال":
-            await update.message.reply_text("📢 <b>بەشی کانال</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_CHAN)
+        if txt == "📢 جۆینی ناچاری":
+            fj = await db_get("system/force_join") or False
+            req_chs = await db_get("system/req_channels") or {}
+            await update.message.reply_text(
+                f"📢 <b>بەشی جۆینی ناچاری</b>\n\n"
+                f"📋 کانالە داواکراوەکان: <b>{len(req_chs)}</b>\n"
+                f"🔔 دۆخ: <b>{'✅ چالاک' if fj else '❌ لەکارخراو'}</b>\n\n"
+                "هەڵبژاردنێک بکە:",
+                parse_mode="HTML", reply_markup=KB_CHAN
+            )
             return
         if txt == "📢 گۆڕینی کانالی سەرەکی":
             await db_put(f"users/{uid}/state", "change_main_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             await update.message.reply_text("📢 یوزەرنەیمی کانالی نوێ بنووسە (بەبێ @):", reply_markup=kb)
             return
+        if txt == "🔔 چالاككردنی جۆینی ناچاری":
+            await db_put("system/force_join", True)
+            await update.message.reply_text("✅ جۆینی ناچاری چالاک کرا!\n\nئێستا بەکارهێنەران پێش بەکارهێنانی بۆت دەبێت ئەندامی کانالەکان بن.", reply_markup=KB_CHAN)
+            return
+        if txt == "🔕 لەکارخستنی جۆینی ناچاری":
+            await db_put("system/force_join", False)
+            await update.message.reply_text("❌ جۆینی ناچاری لەکارخرا.", reply_markup=KB_CHAN)
+            return
         if txt == "➕ زیادکردنی کانالی داواکراو":
             await db_put(f"users/{uid}/state", "add_req_channel")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
             await update.message.reply_text(
-                "➕ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):\n"
-                "ئەم کانالە دەبێت بە بەکارهێنەران داواکرێت بۆ ئەندامبوون",
+                "➕ یوزەرنەیمی کانالەکە بنووسە (بەبێ @):\n\n"
+                "💡 تێبینی: بۆتی سەرەکی دەبێت ئەدمینی ئەم کانالە بێت",
                 reply_markup=kb,
             )
             return
@@ -701,13 +718,9 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if txt == "📋 لیستی کانالەکان":
             await owner_list_channels(update)
             return
-        if txt == "✅ چالاككردنی داواکردنی کانال":
-            await db_put("system/force_join", True)
-            await update.message.reply_text("✅ داواکردنی ئەندامبوون چالاک کرا.", reply_markup=KB_CHAN)
-            return
-        if txt == "❌ لەکارخستنی داواکردن":
-            await db_put("system/force_join", False)
-            await update.message.reply_text("❌ داواکردنی ئەندامبوون لەکارخرا.", reply_markup=KB_CHAN)
+        if txt == "🗑 سڕینەوەی هەموو کانالی داواکراو":
+            await db_del("system/req_channels")
+            await update.message.reply_text("🗑 هەموو کانالە داواکراوەکان سڕایەوە.", reply_markup=KB_CHAN)
             return
         if txt == "🔍 پشکنینی ئەندامی کانال":
             await db_put(f"users/{uid}/state", "check_member")
@@ -850,8 +863,7 @@ async def show_owner_main(update: Update):
         f"🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
         f"👨‍💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
         f"🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
-        f"📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"        "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📌 بەشێک هەڵبژێرە:"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
@@ -882,19 +894,43 @@ async def show_bot_list(update: Update, uid: int):
 
 
 async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
-    st   = "🟢 کاردەکات" if info.get("status") == "running" else "🔴 ڕاگیراوە"
-    name = html.escape(info.get("bot_name","ناسناو"))
-    un   = info.get("bot_username","ناسناو")
-    bu   = await db_get(f"bot_users/{bid}") or {}
-    msg  = (
-        "⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 ناو: {name}\n"
-        f"🔗 یوزەر: @{un}\n"
-        f"📊 دۆخ: {st}\n"
-        f"👥 بەکارهێنەران: <b>{len(bu)}</b>\n"
-        f"🆔 ID: <code>{bid}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━"
+    st_icon = "🟢" if info.get("status") == "running" else "🔴"
+    st_txt  = "چالاک و کاردەکات" if info.get("status") == "running" else "ڕاگیراوە"
+    name    = html.escape(info.get("bot_name","ناسناو"))
+    un      = info.get("bot_username","ناسناو")
+    bu      = await db_get(f"bot_users/{bid}") or {}
+    wlcm    = info.get("welcome_msg","")
+    btype   = info.get("type","reaction")
+    # ئامارەکانی بۆت
+    total_bu = len(bu)
+    # کاتی دروستکردن
+    created = info.get("created", "نییە")
+    owner_id = info.get("owner", "نییە")
+
+    # باری دروست
+    health_bar = ""
+    if info.get("status") == "running":
+        health_bar = "🟩🟩🟩🟩🟩 ١٠٠٪"
+    else:
+        health_bar = "⬛⬛⬛⬛⬛ ٠٪"
+
+    msg = (
+        f"‼️ <b>پانێلی کۆنترۆڵی بۆت</b>\n"
+        f"{'━' * 22}\n"
+        f"🤖 <b>ناو:</b>  {name}\n"
+        f"🔗 <b>یوزەر:</b>  @{un}\n"
+        f"🆔 <b>ID:</b>  <code>{bid}</code>\n"
+        f"{'━' * 22}\n"
+        f"{st_icon} <b>دۆخ:</b>  {st_txt}\n"
+        f"📶 <b>باری سیستەم:</b>  {health_bar}\n"
+        f"{'━' * 22}\n"
+        f"👥 <b>کۆی بەکارهێنەران:</b>  <b>{total_bu}</b> کەس\n"
+        f"🍓 <b>جۆری بۆت:</b>  {'بۆتی ڕیاکشن' if btype=='reaction' else btype}\n"
+        f"✉️ <b>نامەی بەخێرهاتن:</b>  {'✅ دانراوە' if wlcm else '❌ بەتاڵ (پێشکەوتوو)'}\n"
+        f"👑 <b>خاوەنی بۆت:</b>  <a href='tg://user?id={owner_id}'>لینک</a>\n"
+        f"{'━' * 22}\n"
+        f"⚡ <b>بەندەرەکان:</b>  /start  •  ڕیاکشن\n"
+        f"🔗 <b>لینکی بۆت:</b>  <a href='https://t.me/{un}'>t.me/{un}</a>"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb_control(uid))
 
@@ -1682,28 +1718,32 @@ async def owner_list_channels(update: Update):
     req_chs = await db_get("system/req_channels") or {}
     fj      = await db_get("system/force_join") or False
     msg     = (
-        "📢 <b>زانیاری کانالەکان</b>\n"
+        "📢 <b>زانیاری جۆینی ناچاری</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
-        f"📢 کانالی سەرەکی: @{main_ch}\n"
-        f"✅ داواکردنی ئەندامبوون: {'چالاک' if fj else 'لەکارخراو'}\n\n"
-        f"📋 کانالە داواکراوەکان ({len(req_chs)}):\n"
+        f"📢 کانالی سەرەکی بۆتەکان: @{main_ch}\n"
+        f"🔔 دۆخی جۆینی ناچاری: <b>{'✅ چالاک' if fj else '❌ لەکارخراو'}</b>\n\n"
+        f"📋 <b>کانالە داواکراوەکان ({len(req_chs)}):</b>\n"
     )
     if req_chs:
-        for ch in req_chs:
-            msg += f"• @{ch}\n"
+        for i, ch in enumerate(req_chs, 1):
+            msg += f"  {i}. 🔗 @{ch} — <a href='https://t.me/{ch}'>لینک</a>\n"
     else:
-        msg += "نییە"
+        msg += "  📭 هیچ کانالێک زیادنەکراوە\n"
+    msg += "\n💡 جۆینی ناچاری کاردەکات کاتێک بەکارهێنەر /start بکات"
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_CHAN)
 
 
 async def owner_channel_stats(update: Update):
     req_chs = await db_get("system/req_channels") or {}
     fj      = await db_get("system/force_join")   or False
+    all_u   = await db_get("users") or {}
     msg     = (
-        "📊 <b>ئامارەکانی کانال</b>\n"
+        "📊 <b>ئامارەکانی جۆینی ناچاری</b>\n"
         "━━━━━━━━━━━━━━━━━━━\n"
+        f"🔔 دۆخ: <b>{'✅ چالاک' if fj else '❌ لەکارخراو'}</b>\n"
         f"📋 کانالە داواکراوەکان: <b>{len(req_chs)}</b>\n"
-        f"✅ داواکردنی ئەندامبوون: <b>{'چالاک' if fj else 'لەکارخراو'}</b>"
+        f"👥 کۆی بەکارهێنەران: <b>{len(all_u)}</b>\n\n"
+        f"📌 کاتێک چالاکە: هەر بەکارهێنەرێک /start بکات، پشکنینی دەکرێت"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_CHAN)
 
@@ -1783,7 +1823,7 @@ async def owner_sys_info(update: Update):
         f"👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
         f"🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run})\n"
         f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
-        f"📢 داواکردنی کانال: <b>{'چالاک' if fj else 'لەکارخراو'}</b>\n"
+        f"📢 جۆینی ناچاری: <b>{'چالاک' if fj else 'لەکارخراو'}</b>\n"
         f"🛡 مۆدی ئاگادارکردنەوە: <b>{'چالاک' if am else 'لەکارخراو'}</b>\n"
         f"🔔 ئاگادارکردنەوەکان: <b>{'چالاک' if notif else 'لەکارخراو'}</b>\n"
         f"⏰ کاتی ئێستا: <b>{now_str()}</b>"
@@ -1947,7 +1987,29 @@ async def process_child_update(token: str, body: dict):
         user_id   = from_user.get("id", chat_id)
 
         if from_user.get("id"):
+            is_new_user = not await db_get(f"bot_users/{bid}/{user_id}")
             await db_patch(f"bot_users/{bid}/{user_id}", {"name": from_user.get("first_name",""), "chat_id": chat_id})
+            # ئاگادارکردنەوەی خاوەنی بۆت کاتی بەکارهێنەری نوێ
+            if is_new_user and txt.startswith("/start"):
+                owner_uid = info.get("owner")
+                if owner_uid:
+                    uname_str = f"@{from_user.get('username')}" if from_user.get("username") else "—"
+                    notif_msg = (
+                        f"🔔 <b>بەکارهێنەری نوێ!</b>\n"
+                        f"{'━'*20}\n"
+                        f"👤 ناو: <a href='tg://user?id={user_id}'>{user_name}</a>\n"
+                        f"🆔 ID: <code>{user_id}</code>\n"
+                        f"🔗 یوزەر: {uname_str}\n"
+                        f"🤖 بۆت: @{bun}\n"
+                        f"⏰ کات: {now_str()}"
+                    )
+                    try:
+                        await send_tg(MASTER_TOKEN, "sendMessage", {
+                            "chat_id": owner_uid,
+                            "text": notif_msg,
+                            "parse_mode": "HTML"
+                        })
+                    except: pass
 
         async with httpx.AsyncClient(timeout=10) as c:
             if txt.startswith("/start"):
