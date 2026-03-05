@@ -202,9 +202,8 @@ KB_ADMINS = ReplyKeyboardMarkup([
 
 # ── بەشی ئاگادارکردنەوە ────────────────────────────────────────────────────
 KB_NOTIF = ReplyKeyboardMarkup([
-    [KeyboardButton("🔔 ئاگادارکردنەوەی گشتی"),  KeyboardButton("📌 ئاگادارکردنەوەی VIP")],
-    [KeyboardButton("⚠️ ئاگادارکردنەوەی بەکارهێنەر"), KeyboardButton("📋 مێژووی ئاگادارکردنەوە")],
-    [KeyboardButton("🔔 چالاككردنی ئاگادارکردنەوە"), KeyboardButton("🔕 لەکارخستنی ئاگادارکردنەوە")],
+    [KeyboardButton("🔔 ئاگادارکردنەوەی بەکارهێنەران")],
+    [KeyboardButton("📢 ئاگادارکردنەوەی بۆتی سەرەکی")],
     [KeyboardButton("🔙 گەڕانەوە بۆ پانێلی سەرەکی")],
 ], resize_keyboard=True)
 
@@ -314,19 +313,19 @@ async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         run   = sum(1 for v in all_b.values() if v.get("status") == "running")
         admins = await db_get("admins") or {}
         txt = (
-            f"‼️ <b>بەخێربێیت خاوەنی سیستەم، {name}!</b>\n\n"
+            f"‏‼️ <b>بەخێربێیت خاوەنی سیستەم، {name}!</b>\n\n"
+            f"‏━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"‏👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
+            f"‏🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
+            f"‏👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"👥 بەکارهێنەران: <b>{len(all_u)}</b>\n"
-            f"🤖 بۆتەکان: <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
-            f"👨‍💼 ئەدمینەکان: <b>{len(admins)}</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎛 پانێلی سەرەکی — کۆنترۆڵی تەواوی سیستەم\n"
-            "👇 هەڵبژاردنێک بکە:"
+            f"‏🎛 پانێلی سەرەکی — کۆنترۆڵی تەواوی سیستەم\n"
+            f"‏👇 هەڵبژاردنێک بکە:"
         )
         await update.message.reply_text(txt, parse_mode="HTML", reply_markup=kb_main(uid))
     elif await is_admin(uid):
         txt = (
-            f"‼️ <b>بەخێربێیت، ئەدمین {name}{admin_badge}!</b>\n\n"
+            f"‏‼️ <b>بەخێربێیت، ئەدمین {name}{admin_badge}!</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "🛡 دەستتە بۆ پانێلی ئەدمین\n"
             "🤖 دروستکردنی بۆتی تایبەتی خۆت\n"
@@ -337,7 +336,7 @@ async def master_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     else:
         vip_speed = "⚡ خێرا" if await is_vip(uid) else "🐢 ئاسایی"
         txt = (
-            f"‼️ <b>بەخێربێیت، {name}{vip_badge}!</b>\n\n"
+            f"‏‼️ <b>بەخێربێیت، {name}{vip_badge}!</b>\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "🤖 دروستکردنی بۆتی تایبەتی خۆت\n"
             "⚙️ کۆنترۆڵی تەواوی بۆتەکەت\n"
@@ -758,28 +757,38 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
         # ════ بەشی ئاگادارکردنەوە ═════════════════════════════════════════
         if txt == "🔔 بەشی ئاگادارکردنەوە":
-            await update.message.reply_text("🔔 <b>بەشی ئاگادارکردنەوە</b>\n\nهەڵبژاردنێک بکە:", parse_mode="HTML", reply_markup=KB_NOTIF)
+            R = "\u200f"
+            notif_users = await db_get("system/notif_users_enabled") or True
+            notif_main  = await db_get("system/notif_main_enabled")  or True
+            await update.message.reply_text(
+                f"{R}🔔 <b>بەشی ئاگادارکردنەوە</b>\n\n"
+                f"{R}👥 ئاگادارکردنەوەی بەکارهێنەران: <b>{'✅ چالاک' if notif_users else '❌ لەکارخراو'}</b>\n"
+                f"{R}📢 ئاگادارکردنەوەی بۆتی سەرەکی: <b>{'✅ چالاک' if notif_main else '❌ لەکارخراو'}</b>\n\n"
+                f"{R}👇 هەڵبژێرە:",
+                parse_mode="HTML", reply_markup=KB_NOTIF
+            )
             return
-        if txt == "🔔 ئاگادارکردنەوەی گشتی":
+        if txt == "🔔 ئاگادارکردنەوەی بەکارهێنەران":
             await db_put(f"users/{uid}/state", "notif_all")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("🔔 <b>ئاگادارکردنەوەی گشتی</b>\n\nنامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
+            R = "\u200f"
+            await update.message.reply_text(
+                f"{R}🔔 <b>ئاگادارکردنەوەی بەکارهێنەران</b>\n\n"
+                f"{R}📨 ئەم نامەیە دەچێت بۆ هەموو بەکارهێنەرانی بۆتەکەت\n\n"
+                f"{R}⬇️ نامەکەت بنووسە:",
+                parse_mode="HTML", reply_markup=kb
+            )
             return
-        if txt == "📌 ئاگادارکردنەوەی VIP":
-            await db_put(f"users/{uid}/state", "notif_vip")
+        if txt == "📢 ئاگادارکردنەوەی بۆتی سەرەکی":
+            await db_put(f"users/{uid}/state", "notif_master")
             kb = ReplyKeyboardMarkup([[KeyboardButton("❌ هەڵوەشاندنەوە")]], resize_keyboard=True)
-            await update.message.reply_text("💎 <b>ئاگادارکردنەوەی تایبەت بۆ VIPەکان</b>\n\nنامەکەت بنووسە:", parse_mode="HTML", reply_markup=kb)
-            return
-        if txt == "📋 مێژووی ئاگادارکردنەوە":
-            await owner_notif_history(update)
-            return
-        if txt == "🔔 چالاككردنی ئاگادارکردنەوە":
-            await db_put("system/notifications_enabled", True)
-            await update.message.reply_text("✅ ئاگادارکردنەوەکان چالاک کرا.", reply_markup=KB_NOTIF)
-            return
-        if txt == "🔕 لەکارخستنی ئاگادارکردنەوە":
-            await db_put("system/notifications_enabled", False)
-            await update.message.reply_text("🔕 ئاگادارکردنەوەکان لەکارخرا.", reply_markup=KB_NOTIF)
+            R = "\u200f"
+            await update.message.reply_text(
+                f"{R}📢 <b>ئاگادارکردنەوەی بۆتی سەرەکی</b>\n\n"
+                f"{R}📨 ئەم نامەیە دەچێت بۆ هەموو بەکارهێنەرانی بۆتی سەرەکی (دروستکەرانی بۆت)\n\n"
+                f"{R}⬇️ نامەکەت بنووسە:",
+                parse_mode="HTML", reply_markup=kb
+            )
             return
 
         # ════ بەشی سیستەم ═════════════════════════════════════════════════
@@ -855,16 +864,16 @@ async def show_owner_main(update: Update):
     notif_on = await db_get("system/notifications_enabled")
     fj       = await db_get("system/force_join") or False
     msg = (
-        "‼️ <b>پانێلی سەرەکی</b>\n"
+        "‏‼️ <b>پانێلی سەرەکی</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
-        f"🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
-        f"💎 VIPەکان:        <b>{len(all_v)}</b>\n"
-        f"🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
-        f"👨‍💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
-        f"🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
-        f"📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"        "━━━━━━━━━━━━━━━━━━━━━━\n"
-        "📌 بەشێک هەڵبژێرە:"
+        f"‏👥 بەکارهێنەران:   <b>{len(all_u)}</b>\n"
+        f"‏🤖 بۆتەکان:        <b>{len(all_b)}</b>  (🟢{run}  🔴{len(all_b)-run})\n"
+        f"‏💎 VIPەکان:        <b>{len(all_v)}</b>\n"
+        f"‏🚫 بلۆکەکان:       <b>{len(all_bl)}</b>\n"
+        f"‏👨‍💼 ئەدمینەکان:     <b>{len(admins)}</b>\n"
+        f"‏🔔 ئاگادارکردنەوە: <b>{'چالاک ✅' if notif_on else 'لەکارخراو ❌'}</b>\n"
+        f"‏📢 جۆینی ناچاری:   <b>{'چالاک ✅' if fj else 'لەکارخراو ❌'}</b>\n"        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "‏📌 بەشێک هەڵبژێرە:"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=KB_OWNER_MAIN)
 
@@ -887,50 +896,33 @@ async def show_bot_list(update: Update, uid: int):
         rows.append([KeyboardButton(f"{st} @{info.get('bot_username','Bot')}")])
     rows.append([KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")])
     await update.message.reply_text(
-        f"📂 <b>بۆتەکانت ({len(mine)}):</b>\n🟢 کاردەکات  |  🔴 ڕاگیراوە",
+        f"‏📂 <b>بۆتەکانت ({len(mine)}):</b>\n‏🟢 کاردەکات  |  🔴 ڕاگیراوە",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(rows, resize_keyboard=True),
     )
 
 
 async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
+    R = "\u200f"  # RTL mark
     st_icon = "🟢" if info.get("status") == "running" else "🔴"
-    st_txt  = "چالاک و کاردەکات" if info.get("status") == "running" else "ڕاگیراوە"
-    name    = html.escape(info.get("bot_name","ناسناو"))
-    un      = info.get("bot_username","ناسناو")
+    st_txt  = f"{R}چالاک ✅" if info.get("status") == "running" else f"{R}ڕاگیراوە ❌"
+    name    = html.escape(info.get("bot_name", "ناسناو"))
+    un      = info.get("bot_username", "ناسناو")
     bu      = await db_get(f"bot_users/{bid}") or {}
-    wlcm    = info.get("welcome_msg","")
-    btype   = info.get("type","reaction")
-    # ئامارەکانی بۆت
-    total_bu = len(bu)
-    # کاتی دروستکردن
-    created = info.get("created", "نییە")
-    owner_id = info.get("owner", "نییە")
-
-    # باری دروست
-    health_bar = ""
-    if info.get("status") == "running":
-        health_bar = "🟩🟩🟩🟩🟩 ١٠٠٪"
-    else:
-        health_bar = "⬛⬛⬛⬛⬛ ٠٪"
+    wlcm    = info.get("welcome_msg", "")
+    owner_id = info.get("owner", "")
 
     msg = (
-        f"‼️ <b>پانێلی کۆنترۆڵی بۆت</b>\n"
-        f"{'━' * 22}\n"
-        f"🤖 <b>ناو:</b>  {name}\n"
-        f"🔗 <b>یوزەر:</b>  @{un}\n"
-        f"🆔 <b>ID:</b>  <code>{bid}</code>\n"
-        f"{'━' * 22}\n"
-        f"{st_icon} <b>دۆخ:</b>  {st_txt}\n"
-        f"📶 <b>باری سیستەم:</b>  {health_bar}\n"
-        f"{'━' * 22}\n"
-        f"👥 <b>کۆی بەکارهێنەران:</b>  <b>{total_bu}</b> کەس\n"
-        f"🍓 <b>جۆری بۆت:</b>  {'بۆتی ڕیاکشن' if btype=='reaction' else btype}\n"
-        f"✉️ <b>نامەی بەخێرهاتن:</b>  {'✅ دانراوە' if wlcm else '❌ بەتاڵ (پێشکەوتوو)'}\n"
-        f"👑 <b>خاوەنی بۆت:</b>  <a href='tg://user?id={owner_id}'>لینک</a>\n"
-        f"{'━' * 22}\n"
-        f"⚡ <b>بەندەرەکان:</b>  /start  •  ڕیاکشن\n"
-        f"🔗 <b>لینکی بۆت:</b>  <a href='https://t.me/{un}'>t.me/{un}</a>"
+        f"{R}⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━\n"
+        f"{R}🤖 <b>ناو:</b> {name}\n"
+        f"{R}🔗 <b>یوزەر:</b> @{un}\n"
+        f"{R}🆔 <b>ID:</b> <code>{bid}</code>\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━\n"
+        f"{R}{st_icon} <b>دۆخ:</b> {st_txt}\n"
+        f"{R}👥 <b>بەکارهێنەران:</b> <b>{len(bu)}</b> کەس\n"
+        f"{R}✉️ <b>بەخێرهاتن:</b> {'✅ دانراوە' if wlcm else '❌ بەتاڵ'}\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━"
     )
     await update.message.reply_text(msg, parse_mode="HTML", reply_markup=kb_control(uid))
 
@@ -945,7 +937,7 @@ async def show_stats(update: Update, uid: int):
         all_v = await db_get("vip") or {}
         admins = await db_get("admins") or {}
         txt   = (
-            "📊 <b>ئامارەکانی سیستەم</b>\n"
+            "‏📊 <b>ئامارەکانی سیستەم</b>\n"
             "━━━━━━━━━━━━━━━━━━━\n"
             f"👥 هەموو بەکارهێنەران: <b>{len(all_u)}</b>\n"
             f"🤖 هەموو بۆتەکان:      <b>{len(all_b)}</b>\n"
@@ -962,7 +954,7 @@ async def show_stats(update: Update, uid: int):
             bu_count += len(bu)
         vip_badge = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
         txt = (
-            "📊 <b>ئامارەکانت</b>\n"
+            "‏📊 <b>ئامارەکانت</b>\n"
             "━━━━━━━━━━━━━━━━━━━\n"
             f"🎖 دۆخ: <b>{vip_badge}</b>\n"
             f"🤖 بۆتی دروستکردوو: <b>{len(mine)}</b>\n"
@@ -1154,21 +1146,23 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
         return
 
     # ── بڵاوکردنەوەی گشتی ────────────────────────────────────────────────
-    if state in ("bc_all","bc_vip","bc_nonvip","notif_all","notif_vip"):
+    if state in ("bc_all","bc_vip","bc_nonvip","notif_all","notif_vip","notif_master"):
+        R = "\u200f"
         all_u   = await db_get("users") or {}
         all_v   = await db_get("vip")   or {}
         vip_ids = set(all_v.keys())
         is_notif = state.startswith("notif_")
-        notif_type = state.replace("notif_","bc_") if is_notif else state
 
-        if notif_type == "bc_all" or state == "notif_all":
+        if state in ("bc_all", "notif_all"):
             targets = list(all_u.keys())
-        elif notif_type == "bc_vip" or state == "notif_vip":
+        elif state in ("bc_vip", "notif_vip"):
             targets = [i for i in all_u if i in vip_ids]
+        elif state == "notif_master":
+            targets = list(all_u.keys())  # هەموو بەکارهێنەرانی بۆتی سەرەکی
         else:
             targets = [i for i in all_u if i not in vip_ids]
 
-        prefix = "🔔 <b>ئاگادارکردنەوە:</b>\n\n" if is_notif else ""
+        prefix = f"{R}🔔 <b>ئاگادارکردنەوە:</b>\n\n" if is_notif else ""
         sm   = await update.message.reply_text(f"⏳ ناردن بۆ {len(targets)} بەکارهێنەر...")
         sent=fail=0
         for u_id in targets:
@@ -1179,13 +1173,12 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             except: fail+=1
             await asyncio.sleep(0.05)
         await db_del(f"users/{uid}/state")
-        # ذخیره مێژوو
-        hist = await db_get("system/bc_history") or []
-        if isinstance(hist, dict): hist = []
         hist_key = "system/notif_history" if is_notif else "system/bc_history"
+        hist = await db_get(hist_key) or []
+        if isinstance(hist, dict): hist = []
         hist.insert(0, {"time": now_str(), "sent": sent, "fail": fail, "type": state})
         await db_put(hist_key, hist[:20])
-        await sm.edit_text(f"✅ <b>تەواو!</b> 📤{sent}  ❌{fail}", parse_mode="HTML")
+        await sm.edit_text(f"✅ <b>تەواو!</b>\n{R}📤 نێردرا: <b>{sent}</b>\n{R}❌ شکستهێنا: <b>{fail}</b>", parse_mode="HTML")
         reply_kb = KB_NOTIF if is_notif else KB_MSG
         await update.message.reply_text(".", reply_markup=reply_kb)
         return
@@ -1929,7 +1922,7 @@ async def activate_token(update: Update, uid: int, token: str):
         })
         await db_del(f"users/{uid}/state")
         await sm.edit_text(
-            f"✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
+            f"‏✅ <b>بۆتەکەت سەرکەوتووانە دروست کرا!</b>\n\n"
             f"🤖 ناو: {html.escape(bnm)}\n🔗 یوزەر: @{bun}\n🆔 ID: <code>{bid}</code>\n\n"
             "📌 زیادی بکە بۆ گروپ/کانالت و ئادمینی بکە ✅",
             parse_mode="HTML",
@@ -1993,15 +1986,17 @@ async def process_child_update(token: str, body: dict):
             if is_new_user and txt.startswith("/start"):
                 owner_uid = info.get("owner")
                 if owner_uid:
+                    R = "\u200f"
                     uname_str = f"@{from_user.get('username')}" if from_user.get("username") else "—"
                     notif_msg = (
-                        f"🔔 <b>بەکارهێنەری نوێ!</b>\n"
-                        f"{'━'*20}\n"
-                        f"👤 ناو: <a href='tg://user?id={user_id}'>{user_name}</a>\n"
-                        f"🆔 ID: <code>{user_id}</code>\n"
-                        f"🔗 یوزەر: {uname_str}\n"
-                        f"🤖 بۆت: @{bun}\n"
-                        f"⏰ کات: {now_str()}"
+                        f"{R}🔔 <b>بەکارهێنەری نوێ!</b>\n"
+                        f"{R}━━━━━━━━━━━━━━━━━━━\n"
+                        f"{R}👤 ناو: <a href='tg://user?id={user_id}'>{user_name}</a>\n"
+                        f"{R}🆔 ID: <code>{user_id}</code>\n"
+                        f"{R}🔗 یوزەر: {uname_str}\n"
+                        f"{R}🤖 بۆت: @{bun}\n"
+                        f"{R}⏰ کات: {now_str()}\n"
+                        f"{R}━━━━━━━━━━━━━━━━━━━"
                     )
                     try:
                         await send_tg(MASTER_TOKEN, "sendMessage", {
