@@ -13,7 +13,7 @@ DB_URL       = os.getenv("DB_URL")
 DB_SECRET    = os.getenv("DB_SECRET")
 
 OWNER_ID     = 5977475208
-CHANNEL_USER = "j4ck_721s"
+CHANNEL_USER = "jack_721_mod"
 EMOJIS       = ["❤️","🔥","🎉","👏","🤩","💯","😍","🫶","⚡","🌟"]
 PHOTO_URL    = "https://jobin-bro-143-02-7e44d11483ed.herokuapp.com//dl/24585?code=21c8667075cad1c405c844a32363059fc6f15bd353cfbea4"
 
@@ -419,14 +419,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
         ], resize_keyboard=True)
         await update.message.reply_text(
-            f"{R}🤖 <b>جۆری بۆتەکەت هەڵبژێرە</b>\n"
-            f"{R}━━━━━━━━━━━━━━━━━━━\n"
-            f"{R}🍓 <b>بۆتی ڕیاکشن</b>\n"
-            f"{R}   بۆ هەموو نامەیەک ئیموجی دەنێرێت\n\n"
-            f"{R}🪪 <b>بۆتی زانیاری</b>\n"
-            f"{R}   فەرمانی /id و /info پشتگیری دەکات\n"
-            f"{R}   زانیاری تەواوی بەکارهێنەر نیشان دەدات\n"
-            f"{R}━━━━━━━━━━━━━━━━━━━",
+            f"{R}🤖 <b>جۆری بۆتەکەت هەڵبژێرە</b>",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -2313,17 +2306,18 @@ async def process_child_update(token: str, body: dict):
                 except: pass
 
                 user_link = f"<a href='tg://user?id={user_id}'>🔗 پرۆفایل</a>"
+                R = "\u200f"
                 info_text = (
-                    "༶•┈┈┈┈୨🌟୧┈┈┈┈•༶\n\n"
-                    "      -ˏˋ <b>𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘</b> ˊˎ-\n\n"
-                    f"<b>👤 ›› ناو</b> ⵓ {first_name}\n"
-                    f"<b>📧 ›› یوزەر</b> ⵓ {uname_str}\n"
-                    f"<b>🆔 ›› ID</b> ⵓ <code>{user_id}</code>\n"
-                    f"<b>✨ ›› پریمیوم</b> ⵓ {is_premium}\n"
-                    f"<b>🌐 ›› زمان</b> ⵓ {lang_code}\n"
-                    f"<b>🛡️ ›› ڕۆڵ</b> ⵓ {status_txt}\n"
-                    f"<b>🔗 ›› لینک</b> ⵓ {user_link}\n\n"
-                    "༶•┈┈┈┈୨🌟୧┈┈┈┈•༶"
+                    f"{R}.:•------------9🌟e------------•:.\n\n"
+                    f"{R}      -ˏˋ <b>𝗨𝗦𝗘𝗥 𝗣𝗥𝗢𝗙𝗜𝗟𝗘</b> ˊˎ-\n\n"
+                    f"{R}👤 ›› <b>ناو</b> ⵓ {first_name}\n"
+                    f"{R}📧 ›› <b>یوزەر</b> ⵓ {uname_str}\n"
+                    f"{R}🆔 ›› <b>ID</b> ⵓ <code>{user_id}</code>\n"
+                    f"{R}✨ ›› <b>پریمیوم</b> ⵓ {is_premium}\n"
+                    f"{R}🌐 ›› <b>زمان</b> ⵓ {lang_code}\n"
+                    f"{R}🛡️ ›› <b>ڕۆڵ</b> ⵓ {status_txt}\n"
+                    f"{R}🔗 ›› <b>لینک</b> ⵓ {user_link}\n\n"
+                    f"{R}.:•------------9🌟e------------•:."
                 )
                 # ناردنی وێنەی پرۆفایل
                 try:
