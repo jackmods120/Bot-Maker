@@ -1335,7 +1335,7 @@ async def handle_control(update: Update, uid: int, txt: str):
     elif txt == "🔗 نوێکردنەوەی وەبهووک" and uid == OWNER_ID:
         if token:
             safe = (PROJECT_URL or "").rstrip('/')
-            r    = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post"]})
+            r    = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post","callback_query"]})
             resp = "✅ وەبهووک نوێکرایەوە!" if r.get("ok") else f"❌ هەڵە: {r.get('description','')}"
             await update.message.reply_text(resp, reply_markup=kb_control(uid))
         else:
@@ -1431,6 +1431,9 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                 parse_mode="HTML", reply_markup=kb_control(uid)
             )
         return
+
+    # ── چاوەڕوانی تۆکێن ──────────────────────────────────────────────────
+    if state == "await_token":
         if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", txt):
             await activate_token(update, uid, txt)
         else:
@@ -1499,7 +1502,7 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
             info["bot_name"]     = res["result"]["first_name"]
             await db_put(f"managed_bots/{bid}", info)
             safe = (PROJECT_URL or "").rstrip('/')
-            await send_tg(txt,"setWebhook",{"url":f"{safe}/api/bot/{txt}","allowed_updates":["message","channel_post"]})
+            await send_tg(txt,"setWebhook",{"url":f"{safe}/api/bot/{txt}","allowed_updates":["message","channel_post","callback_query"]})
             await db_del(f"users/{uid}/state")
             await update.message.reply_text("✅ تۆکێن گۆڕدرا!", reply_markup=kb_control(uid))
         else:
@@ -2284,7 +2287,7 @@ async def owner_refresh_all_webhooks(update: Update):
         if bd.get("status") != "running": continue
         token = bd.get("token","")
         if not token: continue
-        r = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post"]})
+        r = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post","callback_query"]})
         if r.get("ok"): ok+=1
         else: fail+=1
         await asyncio.sleep(0.1)
@@ -2363,7 +2366,7 @@ async def activate_token(update: Update, uid: int, token: str):
             await sm.edit_text(f"⚠️ بۆتی @{bun} پێشتر تۆمارکراوە!")
             return
         safe = (PROJECT_URL or "").rstrip('/')
-        wh   = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post"]})
+        wh   = await send_tg(token,"setWebhook",{"url":f"{safe}/api/bot/{token}","allowed_updates":["message","channel_post","callback_query"]})
         if not wh.get("ok"):
             await sm.edit_text("❌ هەڵەیەک ڕوویدا لە بەستنەوەی وەبهووک.")
             return
