@@ -306,6 +306,7 @@ KB_SEC = ReplyKeyboardMarkup([
 # ── هەڵبژاردنی جۆری بۆت ──────────────────────────────────────────────────
 KB_BOT_TYPE = ReplyKeyboardMarkup([
     [KeyboardButton("🍓 بۆتی ڕیاکشن"),   KeyboardButton("🪪 بۆتی زانیاری")],
+    [KeyboardButton("🌤️ بۆتی کەش و هەوا")],
     [KeyboardButton("❌ هەڵوەشاندنەوە")],
 ], resize_keyboard=True)
 KB_CHAN = ReplyKeyboardMarkup([
@@ -479,8 +480,22 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if txt == "🪪 بۆتی زانیاری":
+    if txt == "🌤️ بۆتی کەش و هەوا":
         await db_put(f"users/{uid}/state", "await_token")
+        await db_put(f"users/{uid}/pending_bot_type", "weather")
+        R = "\u200f"
+        kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
+        await update.message.reply_text(
+            f"{R}🌤️ <b>دروستکردنی بۆتی کەش و هەوا</b>\n\n"
+            f"{R}📋 <b>مامەڵەکە:</b>\n"
+            f"{R}١. بچۆ بۆ @BotFather لە تێلیگرام\n"
+            f"{R}٢. بنووسە /newbot\n"
+            f"{R}٣. ناوی بۆتەکەت دابنێ\n"
+            f"{R}٤. تۆکێنەکەی کۆپی بکە و لێرە بینێرە\n\n"
+            f"{R}⬇️ <b>تۆکێنەکەت لێرە بینێرە:</b>",
+            parse_mode="HTML", reply_markup=kb,
+        )
+        return
         await db_put(f"users/{uid}/pending_bot_type", "info")
         R = "\u200f"
         kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
@@ -1190,7 +1205,7 @@ async def show_bot_control(update: Update, uid: int, bid: str, info: dict):
     wlcm     = info.get("welcome_msg", "")
     btype    = info.get("type", "reaction")
     notif_on = info.get("notif_enabled", True)
-    type_lbl = "🍓 بۆتی ڕیاکشن" if btype == "reaction" else "🪪 بۆتی زانیاری"
+    type_lbl = "🍓 بۆتی ڕیاکشن" if btype == "reaction" else ("🌤️ بۆتی کەش و هەوا" if btype == "weather" else "🪪 بۆتی زانیاری")
 
     msg = (
         f"{R}⚙️ <b>پانێلی کۆنترۆڵ</b>\n"
@@ -1384,10 +1399,26 @@ async def handle_states(update: Update, uid: int, txt: str, state: str):
                 f"{R}🔔 هەربەکارهێنەرێک /start کرد ئاگادار دەکرێیتەوە",
                 parse_mode="HTML", reply_markup=kb_control(uid)
             )
+        elif txt == "🌤️ بۆتی کەش و هەوا":
+            binfo = await db_get(f"managed_bots/{bid}") or {}
+            binfo["type"] = "weather"
+            await db_put(f"managed_bots/{bid}", binfo)
+            await db_del(f"users/{uid}/state")
+            await db_del(f"users/{uid}/pending_bot_id")
+            await db_put(f"users/{uid}/selected_bot", bid)
+            await update.message.reply_text(
+                f"{R}🌤️ <b>بۆتی کەش و هەوا هەڵبژێردرا</b>\n\n"
+                f"{R}📌 ئەم بۆتە:\n"
+                f"{R}▪️ کەش و هەوای ٥٠+ شاری کوردستان\n"
+                f"{R}▪️ پێشبینی ٣ و ٧ ڕۆژ\n"
+                f"{R}▪️ زانیاری ساعاتانە\n\n"
+                f"{R}📌 هەنگاوەکان:\n"
+                f"{R}١. /start بنووسە لە بۆتەکەت\n"
+                f"{R}٢. ناوچە و شار هەڵبژێرە\n"
+                f"{R}🔔 هەربەکارهێنەرێک /start کرد ئاگادار دەکرێیتەوە",
+                parse_mode="HTML", reply_markup=kb_control(uid)
+            )
         return
-
-    # ── چاوەڕوانی تۆکێن ───────────────────────────────────────────────────
-    if state == "await_token":
         if re.match(r"^\d{8,10}:[A-Za-z0-9_-]{35}$", txt):
             await activate_token(update, uid, txt)
         else:
@@ -2337,12 +2368,15 @@ async def activate_token(update: Update, uid: int, token: str):
         await db_put(f"users/{uid}/selected_bot", bid)
         R = "\u200f"
         vip_stat  = "💎 VIP" if await is_vip(uid) else "👤 ئاسایی"
-        type_lbl  = "🍓 بۆتی ڕیاکشن" if chosen_type == "reaction" else "🪪 بۆتی زانیاری"
-        type_hint = (
-            f"{R}٥. بۆ هەموو نامەیەک ئیموجی دەنێرێت 🍓"
-            if chosen_type == "reaction" else
-            f"{R}٥. /id یان /info بنووسە تا زانیاری بەکارهێنەر ببینیت 🪪"
-        )
+        if chosen_type == "reaction":
+            type_lbl  = "🍓 بۆتی ڕیاکشن"
+            type_hint = f"{R}٥. بۆ هەموو نامەیەک ئیموجی دەنێرێت 🍓"
+        elif chosen_type == "weather":
+            type_lbl  = "🌤️ بۆتی کەش و هەوا"
+            type_hint = f"{R}٥. /start بنووسە، ناوچە و شار هەڵبژێرە 🌤️"
+        else:
+            type_lbl  = "🪪 بۆتی زانیاری"
+            type_hint = f"{R}٥. /id یان /info بنووسە تا زانیاری بەکارهێنەر ببینیت 🪪"
         await sm.edit_text(
             f"{R}🎉 <b>پیرۆزە! بۆتەکەت سەرکەوتووانە دروست کرا</b>\n"
             f"{R}━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -2393,6 +2427,254 @@ async def do_delete_bot(update: Update, uid: int, bid: str, back_kb=None):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# ██  بۆتی کەش و هەوا — داتا و فانکشنەکان
+# ══════════════════════════════════════════════════════════════════════════════
+
+OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+
+KURDISTAN_CITIES = {
+    "iraq": {
+        "name": "🇮🇶 کوردستانی عێراق",
+        "cities": {
+            "هەولێر":      {"lat": 36.1901, "lon": 44.0091, "emoji": "🏛️"},
+            "سلێمانی":     {"lat": 35.5573, "lon": 45.4352, "emoji": "🏔️"},
+            "دهۆک":        {"lat": 36.8674, "lon": 42.9462, "emoji": "🌿"},
+            "کەرکووک":     {"lat": 35.4681, "lon": 44.3922, "emoji": "🛢️"},
+            "زاخۆ":        {"lat": 37.1446, "lon": 42.6787, "emoji": "🌉"},
+            "ئامێدی":      {"lat": 37.0926, "lon": 43.4878, "emoji": "🏰"},
+            "عەقرە":       {"lat": 36.7451, "lon": 43.8928, "emoji": "⛰️"},
+            "ڕانیە":       {"lat": 36.2580, "lon": 44.7156, "emoji": "🌊"},
+            "شاقڵاوە":     {"lat": 36.4072, "lon": 44.3225, "emoji": "🌸"},
+            "دوکان":       {"lat": 35.9581, "lon": 44.9612, "emoji": "💧"},
+            "دەربەندیخان": {"lat": 35.1118, "lon": 45.6959, "emoji": "🌁"},
+            "پێنجوێن":     {"lat": 35.6217, "lon": 45.9425, "emoji": "❄️"},
+            "حەڵەبجە":     {"lat": 35.1763, "lon": 45.9862, "emoji": "🌹"},
+            "سۆران":       {"lat": 36.6538, "lon": 44.5441, "emoji": "🏕️"},
+            "ڕەواندوز":    {"lat": 36.6130, "lon": 44.5263, "emoji": "🌈"},
+            "خانەقین":     {"lat": 34.3477, "lon": 45.3786, "emoji": "🌻"},
+            "قەلادزێ":     {"lat": 36.1820, "lon": 45.1314, "emoji": "🏯"},
+            "چۆمان":       {"lat": 36.6333, "lon": 44.8833, "emoji": "🏔️"},
+            "سیدەکان":     {"lat": 36.6667, "lon": 44.5333, "emoji": "🌲"},
+            "بارزان":      {"lat": 36.9167, "lon": 43.9833, "emoji": "🦅"},
+        }
+    },
+    "iran": {
+        "name": "🇮🇷 ڕۆژهەڵاتی کوردستان",
+        "cities": {
+            "مەهاباد":     {"lat": 36.7631, "lon": 45.7228, "emoji": "🌊"},
+            "کرماشان":     {"lat": 34.3142, "lon": 47.0650, "emoji": "🏛️"},
+            "سەنەندەج":    {"lat": 35.3219, "lon": 47.0050, "emoji": "🏔️"},
+            "بانە":        {"lat": 35.9977, "lon": 45.8854, "emoji": "🛍️"},
+            "مریوان":      {"lat": 35.5230, "lon": 46.1748, "emoji": "💦"},
+            "سەقز":        {"lat": 36.2459, "lon": 46.2685, "emoji": "🌾"},
+            "ئۆشنۆ":       {"lat": 37.0409, "lon": 45.0981, "emoji": "🌺"},
+            "پیرانشار":    {"lat": 36.6981, "lon": 45.1382, "emoji": "⛰️"},
+            "سەرداشت":     {"lat": 36.1558, "lon": 45.4772, "emoji": "🌲"},
+            "هەورامان":    {"lat": 35.2010, "lon": 46.4400, "emoji": "🏰"},
+        }
+    },
+    "turkey": {
+        "name": "🇹🇷 باکووری کوردستان",
+        "cities": {
+            "دیاربەکر":    {"lat": 37.9144, "lon": 40.2306, "emoji": "🏰"},
+            "مەردین":      {"lat": 37.3212, "lon": 40.7245, "emoji": "🕌"},
+            "وان":         {"lat": 38.4891, "lon": 43.4089, "emoji": "💧"},
+            "ئەگری":       {"lat": 39.7191, "lon": 43.0503, "emoji": "🌋"},
+            "بیتلیس":      {"lat": 38.3938, "lon": 42.1232, "emoji": "🏔️"},
+            "موش":         {"lat": 38.7432, "lon": 41.4923, "emoji": "🌾"},
+            "سیرت":        {"lat": 37.9270, "lon": 41.9400, "emoji": "🌿"},
+            "شرناق":       {"lat": 37.5164, "lon": 42.4611, "emoji": "🦅"},
+            "بینگۆل":      {"lat": 38.8854, "lon": 40.4980, "emoji": "🌸"},
+            "تونجەلی":     {"lat": 39.1079, "lon": 39.5477, "emoji": "🌊"},
+        }
+    },
+    "syria": {
+        "name": "🇸🇾 ڕۆژاوای کوردستان",
+        "cities": {
+            "قامیشلۆ":     {"lat": 37.0522, "lon": 41.2268, "emoji": "🌟"},
+            "ئەفرین":      {"lat": 36.5127, "lon": 36.8686, "emoji": "🫒"},
+            "کۆبانی":      {"lat": 36.8890, "lon": 38.3568, "emoji": "🕊️"},
+            "دیریک":       {"lat": 37.1667, "lon": 42.1333, "emoji": "🌾"},
+            "سەرەکانی":    {"lat": 36.8489, "lon": 40.0709, "emoji": "💦"},
+            "حەسەکە":      {"lat": 36.4840, "lon": 40.7489, "emoji": "🌴"},
+            "تل ئەبیەد":   {"lat": 36.6980, "lon": 38.9558, "emoji": "🌵"},
+            "مانبج":       {"lat": 36.5224, "lon": 37.9461, "emoji": "🏙️"},
+            "کۆبانی":      {"lat": 36.8890, "lon": 38.3568, "emoji": "🕊️"},
+            "دەیرەززۆر":   {"lat": 35.3360, "lon": 40.1419, "emoji": "🌊"},
+        }
+    }
+}
+
+WMO_CODES = {
+    0:("ئاسمانی پاک","☀️"),1:("زۆربەی پاک","🌤️"),2:("کەمێک هەور","⛅"),
+    3:("هەوری تەواو","☁️"),45:("تەمووک","🌁"),48:("تەمووکی بەستراو","🌫️"),
+    51:("فیسکەی سووک","🌦️"),53:("فیسکە","🌦️"),55:("فیسکەی توند","🌧️"),
+    61:("بارانی سووک","🌦️"),63:("باران","🌧️"),65:("بارانی توند","🌧️"),
+    71:("بەفری سووک","🌨️"),73:("بەفر","❄️"),75:("بەفری توند","❄️"),
+    80:("شەقامی سووک","🌦️"),81:("شەقام","🌧️"),82:("شەقامی توند","⛈️"),
+    95:("گەڕوگوڵ","⛈️"),96:("گەڕوگوڵ بە تەرزە","⛈️"),99:("گەڕوگوڵی توند","⛈️"),
+}
+WEATHER_WEEKDAYS = {0:"دووشەممە",1:"سێشەممە",2:"چوارشەممە",
+                    3:"پێنجشەممە",4:"هەینی",5:"شەممە",6:"یەکشەممە"}
+WEATHER_CURRENT_FIELDS = [
+    "temperature_2m","relative_humidity_2m","apparent_temperature",
+    "weather_code","cloud_cover","pressure_msl","wind_speed_10m",
+    "wind_direction_10m","wind_gusts_10m","visibility","uv_index","dew_point_2m","precipitation"
+]
+WEATHER_DAILY_FIELDS = [
+    "weather_code","temperature_2m_max","temperature_2m_min",
+    "sunrise","sunset","uv_index_max","precipitation_sum",
+    "wind_speed_10m_max","wind_direction_10m_dominant"
+]
+WEATHER_HOURLY_FIELDS = [
+    "temperature_2m","relative_humidity_2m","weather_code",
+    "wind_speed_10m","precipitation","apparent_temperature"
+]
+
+def wmo_kurd(code: int) -> tuple:
+    return WMO_CODES.get(code, ("نەزانراو","🌡️"))
+
+def weather_wind_dir(deg: float) -> str:
+    dirs = ["باکوور ⬆️","باکوور-ڕۆژهەڵات ↗️","ڕۆژهەڵات ➡️","باشوور-ڕۆژهەڵات ↘️",
+            "باشوور ⬇️","باشوور-ڕۆژئاوا ↙️","ڕۆژئاوا ⬅️","باکوور-ڕۆژئاوا ↖️"]
+    return dirs[round(deg / 45) % 8]
+
+def weather_uv(uv: float) -> str:
+    if uv < 3:  return f"{uv:.0f} 🟢"
+    if uv < 6:  return f"{uv:.0f} 🟡"
+    if uv < 8:  return f"{uv:.0f} 🟠"
+    if uv < 11: return f"{uv:.0f} 🔴"
+    return f"{uv:.0f} 🟣"
+
+def fmt_weather_current(data: dict, city: str, em: str) -> str:
+    c = data["current"]; d = data["daily"]
+    desc, demoji = wmo_kurd(c["weather_code"])
+    temp   = c["temperature_2m"];  feels = c["apparent_temperature"]
+    hum    = c["relative_humidity_2m"]; dew = c["dew_point_2m"]
+    press  = c["pressure_msl"]; cloud = c["cloud_cover"]
+    vis    = (c.get("visibility") or 0) / 1000
+    wind   = c["wind_speed_10m"]; wdir = c["wind_direction_10m"]
+    gust   = c["wind_gusts_10m"]; precip = c.get("precipitation") or 0
+    uv     = c.get("uv_index") or 0
+    t_max  = d["temperature_2m_max"][0]; t_min = d["temperature_2m_min"][0]
+    sr_raw = d["sunrise"][0]; sr = sr_raw.split("T")[1] if "T" in sr_raw else sr_raw
+    ss_raw = d["sunset"][0];  ss = ss_raw.split("T")[1] if "T" in ss_raw else ss_raw
+    now    = datetime.now().strftime("%H:%M  %Y/%m/%d")
+    R = "\u200f"
+    return (
+        f"{R}{em} <b>{city}</b>\n"
+        f"{R}━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{R}{demoji} <b>هەلومەرج:</b> {desc}\n"
+        f"{R}🌡️ <b>گەرمی:</b> <code>{temp:.1f}°C</code>  |  🤔 <b>هەست:</b> <code>{feels:.1f}°C</code>\n"
+        f"{R}🔼 <b>زیاترین:</b> <code>{t_max:.1f}°C</code>   🔽 <b>کەمترین:</b> <code>{t_min:.1f}°C</code>\n\n"
+        f"{R}💧 <b>شێ:</b> <code>{hum}%</code>   🌡️ <b>خاڵی شەودە:</b> <code>{dew:.1f}°C</code>\n"
+        f"{R}☁️ <b>هەور:</b> <code>{cloud}%</code>   👁️ <b>بینراو:</b> <code>{vis:.1f} کم</code>\n"
+        f"{R}📊 <b>کڕەلا:</b> <code>{press:.0f} hPa</code>\n\n"
+        f"{R}🌬️ <b>با:</b> <code>{wind:.1f} کم/س</code> — {weather_wind_dir(wdir)}\n"
+        f"{R}💨 <b>بارزەی با:</b> <code>{gust:.1f} کم/س</code>\n"
+        f"{R}🌧️ <b>باران:</b> <code>{precip:.1f} مم</code>\n"
+        f"{R}☀️ <b>UV:</b> {weather_uv(uv)}\n\n"
+        f"{R}🌅 <b>هەتاوهەڵهاتن:</b> <code>{sr}</code>   🌇 <b>هەتاوچوون:</b> <code>{ss}</code>\n"
+        f"{R}🕐 <b>ئێستا:</b> <code>{now}</code>"
+    )
+
+def fmt_weather_forecast(data: dict, city: str, em: str, days: int) -> str:
+    d = data["daily"]
+    R = "\u200f"
+    msg = f"{R}{em} <b>پێشبینی {days} ڕۆژ — {city}</b>\n{R}━━━━━━━━━━━━━━━━━━━━\n\n"
+    for i in range(min(days, len(d["weather_code"]))):
+        dt      = datetime.strptime(d["time"][i], "%Y-%m-%d")
+        weekday = WEATHER_WEEKDAYS[dt.weekday()]
+        date_f  = dt.strftime("%d/%m")
+        desc, demoji = wmo_kurd(d["weather_code"][i])
+        t_max   = d["temperature_2m_max"][i]; t_min = d["temperature_2m_min"][i]
+        precip  = d["precipitation_sum"][i] or 0
+        wind    = d["wind_speed_10m_max"][i]
+        uv      = d["uv_index_max"][i] or 0
+        sr_raw  = d["sunrise"][i]; sr = sr_raw.split("T")[1] if "T" in sr_raw else sr_raw
+        ss_raw  = d["sunset"][i];  ss = ss_raw.split("T")[1] if "T" in ss_raw else ss_raw
+        today_l = " <b>(ئەمڕۆ)</b>" if i == 0 else ""
+        msg += (f"{R}📅 <b>{weekday} ({date_f})</b>{today_l}\n"
+                f"{R}   {demoji} {desc}\n"
+                f"{R}   🌡️ <code>{t_min:.0f}°C ~ {t_max:.0f}°C</code>\n"
+                f"{R}   🌧️<code>{precip:.1f}مم</code>  🌬️<code>{wind:.0f}کم/س</code>  ☀️UV:<code>{uv:.0f}</code>\n"
+                f"{R}   🌅<code>{sr}</code> — 🌇<code>{ss}</code>\n\n")
+    return msg.strip()
+
+def fmt_weather_hourly(data: dict, city: str, em: str) -> str:
+    hourly = data.get("hourly", {})
+    times  = hourly.get("time", [])
+    temps  = hourly.get("temperature_2m", [])
+    wcodes = hourly.get("weather_code", [])
+    winds  = hourly.get("wind_speed_10m", [])
+    precs  = hourly.get("precipitation", [])
+    humids = hourly.get("relative_humidity_2m", [])
+    today  = datetime.now().strftime("%Y-%m-%d")
+    R = "\u200f"
+    msg   = f"{R}{em} <b>ساعاتانەی ئەمڕۆ — {city}</b>\n{R}━━━━━━━━━━━━━━━━━━━━\n\n"
+    count = 0
+    for i, t in enumerate(times):
+        if not t.startswith(today): continue
+        hour = t.split("T")[1][:5]
+        if int(hour.split(":")[0]) % 3 != 0: continue
+        temp = temps[i] if i < len(temps) else 0
+        wc   = wcodes[i] if i < len(wcodes) else 0
+        wind = winds[i]  if i < len(winds)  else 0
+        prec = precs[i]  if i < len(precs)  else 0
+        hum  = humids[i] if i < len(humids) else 0
+        _, demi = wmo_kurd(wc)
+        rain_str = f"  🌧️<code>{prec:.1f}مم</code>" if prec > 0 else ""
+        msg += f"{R}🕐<code>{hour}</code> {demi}<code>{temp:.0f}°C</code> 💧<code>{hum}%</code> 🌬️<code>{wind:.0f}کم/س</code>{rain_str}\n"
+        count += 1
+    if count == 0:
+        msg += "زانیاری ساعاتانە بەردەست نییە."
+    return msg.strip()
+
+def weather_kb_main() -> dict:
+    rows = [[{"text": rd["name"], "callback_data": f"wfj_region_{rk}"}]
+            for rk, rd in KURDISTAN_CITIES.items()]
+    rows.append([{"text": "🏠 سەرەکی", "callback_data": "wfj_main"}])
+    return {"inline_keyboard": rows}
+
+def weather_kb_cities(rk: str) -> dict:
+    cities = list(KURDISTAN_CITIES[rk]["cities"].keys())
+    info   = KURDISTAN_CITIES[rk]["cities"]
+    rows = []
+    for i in range(0, len(cities), 2):
+        row = [{"text": f"{info[c]['emoji']} {c}", "callback_data": f"wfj_city_{rk}_{c}"}
+               for c in cities[i:i+2]]
+        rows.append(row)
+    rows.append([{"text": "◀️ گەڕانەوە", "callback_data": "wfj_main"}])
+    return {"inline_keyboard": rows}
+
+def weather_kb_options(rk: str, city: str) -> dict:
+    return {"inline_keyboard": [
+        [{"text": "🌡️ کەش و هەوای ئێستا",  "callback_data": f"wfj_w_{rk}_{city}"}],
+        [{"text": "⏰ ساعاتانەی ئەمڕۆ",     "callback_data": f"wfj_h_{rk}_{city}"}],
+        [{"text": "📅 پێشبینی ٣ ڕۆژ",       "callback_data": f"wfj_f3_{rk}_{city}"},
+         {"text": "📅 پێشبینی ٧ ڕۆژ",       "callback_data": f"wfj_f7_{rk}_{city}"}],
+        [{"text": "◀️ گەڕانەوە",             "callback_data": f"wfj_region_{rk}"},
+         {"text": "🏠 سەرەکی",              "callback_data": "wfj_main"}],
+    ]}
+
+def weather_kb_back(rk: str) -> dict:
+    return {"inline_keyboard": [[
+        {"text": "◀️ گەڕانەوە", "callback_data": f"wfj_region_{rk}"},
+        {"text": "🏠 سەرەکی",  "callback_data": "wfj_main"},
+    ]]}
+
+WEATHER_WELCOME = (
+    "\u200f🌤️ <b>بۆتی کەش و هەوای کوردستان</b>\n"
+    "\u200f━━━━━━━━━━━━━━━━━━━━\n\n"
+    "\u200f🇮🇶 کوردستانی عێراق — ٢٠ شار\n"
+    "\u200f🇮🇷 ڕۆژهەڵاتی کوردستان — ١٠ شار\n"
+    "\u200f🇹🇷 باکووری کوردستان — ١٠ شار\n"
+    "\u200f🇸🇾 ڕۆژاوای کوردستان — ١٠ شار\n\n"
+    "\u200f👇 ناوچەیەکی هەڵبژێرە:"
+)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # ── بۆتی منداڵ (Child Bot)
 # ══════════════════════════════════════════════════════════════════════════════
 async def process_child_update(token: str, body: dict):
@@ -2419,6 +2701,109 @@ async def process_child_update(token: str, body: dict):
                 req_chs[ch] = True
 
         msg = body.get("message") or body.get("channel_post")
+
+        # بۆ callback_query — پرۆسەسی تایبەت
+        if body.get("callback_query"):
+            cq       = body["callback_query"]
+            cq_data  = cq.get("data","")
+            cq_from  = cq.get("from",{})
+            cq_uid   = cq_from.get("id")
+            cq_msg   = cq.get("message",{})
+            cq_chat  = cq_msg.get("chat",{}).get("id")
+            cq_mid   = cq_msg.get("message_id")
+            bot_type = info.get("type","reaction")
+
+            if bot_type == "weather" and cq_data.startswith("wfj_"):
+                async with httpx.AsyncClient(timeout=10) as c:
+                    # پەسەندکردنی callback
+                    await c.post(f"https://api.telegram.org/bot{token}/answerCallbackQuery",
+                                 json={"callback_query_id": cq["id"]})
+
+                    if cq_data in ("wfj_main", "wfj_refresh"):
+                        await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                            "chat_id": cq_chat, "message_id": cq_mid,
+                            "text": WEATHER_WELCOME, "parse_mode": "HTML",
+                            "reply_markup": weather_kb_main(),
+                        })
+                        return
+
+                    if cq_data.startswith("wfj_region_"):
+                        rk = cq_data[11:]
+                        region = KURDISTAN_CITIES.get(rk)
+                        if not region: return
+                        cnt = len(region["cities"])
+                        R = "\u200f"
+                        await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                            "chat_id": cq_chat, "message_id": cq_mid,
+                            "text": f"{R}{region['name']}\n{R}━━━━━━━━━━━━━━━━━━━━\n\n{R}📍 {cnt} شار بەردەستە.\n\n{R}شارێک هەڵبژێرە:",
+                            "parse_mode": "HTML",
+                            "reply_markup": weather_kb_cities(rk),
+                        })
+                        return
+
+                    if cq_data.startswith("wfj_city_"):
+                        _, _, rk, city = cq_data.split("_", 3)
+                        region = KURDISTAN_CITIES.get(rk)
+                        if not region: return
+                        ci = region["cities"].get(city)
+                        if not ci: return
+                        R = "\u200f"
+                        await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                            "chat_id": cq_chat, "message_id": cq_mid,
+                            "text": f"{R}{ci['emoji']} <b>{city}</b>\n{R}━━━━━━━━━━━━━━━━━━━━\n\n{R}چی دەتەوێت ببینیت؟",
+                            "parse_mode": "HTML",
+                            "reply_markup": weather_kb_options(rk, city),
+                        })
+                        return
+
+                    for prefix, mode in [("wfj_w_","current"),("wfj_h_","hourly"),
+                                          ("wfj_f3_","forecast3"),("wfj_f7_","forecast7")]:
+                        if cq_data.startswith(prefix):
+                            rest = cq_data[len(prefix):]
+                            rk, city = rest.split("_", 1)
+                            region = KURDISTAN_CITIES.get(rk)
+                            if not region: return
+                            ci = region["cities"].get(city)
+                            if not ci: return
+                            await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                                "chat_id": cq_chat, "message_id": cq_mid,
+                                "text": "\u200f⏳ <b>زانیاری وەردەگیرێت...</b>",
+                                "parse_mode": "HTML",
+                            })
+                            try:
+                                params = {
+                                    "latitude": ci["lat"], "longitude": ci["lon"],
+                                    "current": WEATHER_CURRENT_FIELDS,
+                                    "daily": WEATHER_DAILY_FIELDS,
+                                    "timezone": "auto", "forecast_days": 7,
+                                    "wind_speed_unit": "kmh",
+                                }
+                                if mode == "hourly":
+                                    params["hourly"] = WEATHER_HOURLY_FIELDS
+                                wr = await c.get(OPEN_METEO_URL, params=params, timeout=15)
+                                wr.raise_for_status()
+                                wdata = wr.json()
+                            except:
+                                await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                                    "chat_id": cq_chat, "message_id": cq_mid,
+                                    "text": "\u200f❌ <b>هەڵە:</b> زانیاری نەدۆزرایەوە.",
+                                    "parse_mode": "HTML",
+                                    "reply_markup": weather_kb_back(rk),
+                                })
+                                return
+                            em = ci["emoji"]
+                            if mode == "current":   wmsg = fmt_weather_current(wdata, city, em)
+                            elif mode == "hourly":  wmsg = fmt_weather_hourly(wdata, city, em)
+                            elif mode == "forecast3": wmsg = fmt_weather_forecast(wdata, city, em, 3)
+                            else:                   wmsg = fmt_weather_forecast(wdata, city, em, 7)
+                            await c.post(f"https://api.telegram.org/bot{token}/editMessageText", json={
+                                "chat_id": cq_chat, "message_id": cq_mid,
+                                "text": wmsg, "parse_mode": "HTML",
+                                "reply_markup": weather_kb_back(rk),
+                            })
+                            return
+            return  # callback_query تر نادەستێنین
+
         if not msg: return
 
         chat_id    = msg["chat"]["id"]
@@ -2570,6 +2955,35 @@ async def process_child_update(token: str, body: dict):
                         "chat_id": chat_id, "text": info_text, "parse_mode": "HTML",
                         "reply_to_message_id": message_id, "disable_web_page_preview": True,
                     })
+                return
+
+            # ════ بۆتی کەش و هەوا — /start ══════════════════════════════════
+            if bot_type == "weather" and txt.startswith("/start"):
+                if fj and req_chs and from_user.get("id"):
+                    not_joined = []
+                    for ch in req_chs:
+                        try:
+                            res = await send_tg(token, "getChatMember", {"chat_id": f"@{ch}", "user_id": user_id})
+                            status = res.get("result", {}).get("status", "left")
+                            if status not in ("member","administrator","creator"):
+                                not_joined.append(ch)
+                        except:
+                            not_joined.append(ch)
+                    if not_joined:
+                        kb_rows = [[{"text": f"📢 ئەندامبوون لە @{ch}", "url": f"https://t.me/{ch}"}] for ch in not_joined]
+                        join_msg = "\u200f‼️ <b>تکایە سەرەتا ئەندامی کانالەکانمان بە:</b>\n\n"
+                        for ch in not_joined:
+                            join_msg += f"\u200f• @{ch}\n"
+                        await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                            "chat_id": chat_id, "text": join_msg, "parse_mode": "HTML",
+                            "reply_markup": {"inline_keyboard": kb_rows},
+                        })
+                        return
+                welcome_txt = wlcm.replace("{name}", user_name) if wlcm else WEATHER_WELCOME
+                await c.post(f"https://api.telegram.org/bot{token}/sendMessage", json={
+                    "chat_id": chat_id, "text": welcome_txt,
+                    "parse_mode": "HTML", "reply_markup": weather_kb_main(),
+                })
                 return
 
             # ════ بۆتی ڕیاکشن ═══════════════════════════════════════════════
