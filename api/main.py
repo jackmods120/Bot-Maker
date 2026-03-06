@@ -463,13 +463,10 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await send_force_join_msg(update, not_joined)
                 return
         R = "\u200f"
-        kb = ReplyKeyboardMarkup([
-            [KeyboardButton("🍓 بۆتی ڕیاکشن"), KeyboardButton("🪪 بۆتی زانیاری")],
-            [KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")],
-        ], resize_keyboard=True)
+        await db_put(f"users/{uid}/state", "choose_bot_type")
         await update.message.reply_text(
             f"{R}🤖 <b>جۆری بۆتەکەت هەڵبژێرە</b>",
-            parse_mode="HTML", reply_markup=kb,
+            parse_mode="HTML", reply_markup=KB_BOT_TYPE,
         )
         return
 
@@ -506,6 +503,9 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML", reply_markup=kb,
         )
         return
+
+    if txt == "🪪 بۆتی زانیاری":
+        await db_put(f"users/{uid}/state", "await_token")
         await db_put(f"users/{uid}/pending_bot_type", "info")
         R = "\u200f"
         kb = ReplyKeyboardMarkup([[KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")]], resize_keyboard=True)
