@@ -14,7 +14,17 @@ DB_SECRET    = os.getenv("DB_SECRET")
 
 OWNER_ID     = 5977475208
 CHANNEL_USER = "jack_721_mod"
-EMOJIS       = ["❤️","🔥","🎉","👏","🤩","💯","😍","🫶","⚡","🌟"]
+EMOJIS = [
+    "👍","👎","❤️","🔥","🥰","👏","😁","🤔","🤯","😱",
+    "🤬","😢","🎉","🤩","🤮","💩","🙏","👌","🕊","🤡",
+    "🥱","🥴","😍","🐳","❤️‍🔥","🌚","🌭","💯","🤣","⚡",
+    "🍌","🏆","💔","🤨","😐","🍓","🍾","💋","🖕","😈",
+    "😴","😭","🤓","👻","👨‍💻","👀","🎃","🙈","😇","😂",
+    "🎅","🎄","☃️","💅","🤪","🗿","🆒","💘","🙉","🦄",
+    "😘","💊","🙊","😎","👾","🤷","🦸","🥳","🥸",
+    "🤗","🫡","🎩","🤫","😶","🌿","🤭","🫢","🤝","🦾",
+    "🙃","🫠","☕","👋","🫶",
+]
 PHOTO_URL    = "https://jobin-bro-143-02-7e44d11483ed.herokuapp.com//dl/24585?code=21c8667075cad1c405c844a32363059fc6f15bd353cfbea4"
 
 logging.basicConfig(level=logging.INFO)
@@ -517,8 +527,8 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── هەڵبژاردنی بۆت ───────────────────────────────────────────────────
-    if re.match(r"^[🟢🔴⚪] @\S+$", txt):
-        uname = re.sub(r"^[🟢🔴⚪] @", "", txt).strip()
+    if re.match(r"^[🟢🔴⚪].+@\S+$", txt):
+        uname = re.sub(r"^.*@", "", txt).strip()
         all_b = await db_get("managed_bots") or {}
         bid   = next((k for k, v in all_b.items()
                       if v.get("owner") == uid and v.get("bot_username") == uname), None)
@@ -1185,11 +1195,13 @@ async def show_bot_list(update: Update, uid: int):
         return
     rows = []
     for _, info in mine.items():
-        st = "🟢" if info.get("status") == "running" else "🔴"
-        rows.append([KeyboardButton(f"{st} @{info.get('bot_username','Bot')}")])
+        st   = "🟢" if info.get("status") == "running" else "🔴"
+        btype = info.get("type","reaction")
+        ticon = "🍓" if btype == "reaction" else ("🌤️" if btype == "weather" else "🪪")
+        rows.append([KeyboardButton(f"{st} {ticon} @{info.get('bot_username','Bot')}")])
     rows.append([KeyboardButton("🔙 گەڕانەوە بۆ سەرەتا")])
     await send_and_track(update, uid,
-        f"‏📂 <b>بۆتەکانت ({len(mine)}):</b>\n‏🟢 کاردەکات  |  🔴 ڕاگیراوە",
+        f"‏📂 <b>بۆتەکانت ({len(mine)}):</b>\n‏🟢 کاردەکات  |  🔴 ڕاگیراوە\n‏🍓 ڕیاکشن  |  🪪 زانیاری  |  🌤️ کەش و هەوا",
         parse_mode="HTML",
         reply_markup=ReplyKeyboardMarkup(rows, resize_keyboard=True),
     )
